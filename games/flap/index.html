@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Flap — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 2/3; width: 100%; max-width: 400px; touch-action: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">FLAP</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SCORE <strong id="score">0</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>FLAP</h2>
+      <p>Tap, click, or press Space to flap. Thread the gaps &mdash; don't hit the pipes or the ground.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+let W, H, dpr, bird, pipes, score, best, running, rafId, spawnTimer, elapsed;
+const GRAVITY = 1500, FLAP_V = -430, PIPE_GAP = 168, PIPE_W = 62, PIPE_SPEED = 165;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  W = rect.width; H = rect.height;
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function reset() {
+  bird = { x: W * 0.3, y: H / 2, vy: 0, r: Math.min(W, H) * 0.035 };
+  pipes = [];
+  score = 0; elapsed = 0; spawnTimer = 0;
+  scoreEl.textContent = 0;
+  best = Number(localStorage.getItem("flap-best") || 0);
+  bestEl.textContent = best;
+}
+
+function spawnPipe() {
+  const margin = H * 0.12;
+  const gapY = margin + Math.random() * (H - margin * 2 - PIPE_GAP);
+  pipes.push({ x: W + PIPE_W, gapY, passed: false });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#0b0f2a");
+  bg.addColorStop(1, "#160a29");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  if (!bird) return;
+
+  ctx.fillStyle = "#7cf7c9";
+  ctx.shadowColor = "#7cf7c9";
+  ctx.shadowBlur = 10;
+  pipes.forEach((p) => {
+    ctx.beginPath();
+    ctx.roundRect(p.x, 0, PIPE_W, p.gapY, 6);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.roundRect(p.x, p.gapY + PIPE_GAP, PIPE_W, H - (p.gapY + PIPE_GAP), 6);
+    ctx.fill();
+  });
+  ctx.shadowBlur = 0;
+
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  const angle = Math.max(-0.5, Math.min(0.9, bird.vy / 700));
+  ctx.rotate(angle);
+  ctx.fillStyle = "#ffe17d";
+  ctx.shadowColor = "#ffe17d";
+  ctx.shadowBlur = 14;
+  ctx.beginPath();
+  ctx.arc(0, 0, bird.r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function flap() {
+  if (!running) return;
+  bird.vy = FLAP_V;
+  Sound.move();
+}
+
+function update(dt) {
+  bird.vy += GRAVITY * dt;
+  bird.y += bird.vy * dt;
+
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnPipe();
+    spawnTimer = 1.5;
+  }
+
+  pipes.forEach((p) => (p.x -= PIPE_SPEED * dt));
+  pipes = pipes.filter((p) => p.x > -PIPE_W - 5);
+
+  for (const p of pipes) {
+    if (!p.passed && p.x + PIPE_W < bird.x) {
+      p.passed = true;
+      score++;
+      scoreEl.textContent = score;
+      Sound.coin();
+    }
+    const withinX = bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_W;
+    if (withinX && (bird.y - bird.r < p.gapY || bird.y + bird.r > p.gapY + PIPE_GAP)) {
+      endGame();
+      return;
+    }
+  }
+
+  if (bird.y + bird.r > H || bird.y - bird.r < 0) {
+    endGame();
+    return;
+  }
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.033);
+  lastTime = t;
+  update(dt);
+  if (!running) return;
+  draw();
+  rafId = requestAnimationFrame(loop);
+}
+
+function endGame() {
+  running = false;
+  cancelAnimationFrame(rafId);
+  Sound.bad();
+  if (score > best) { best = score; localStorage.setItem("flap-best", String(best)); }
+  bestEl.textContent = best;
+  overlay.innerHTML = `<h2>Game Over</h2><p>Score: ${score}${score >= best && score > 0 ? " — New best!" : ""}</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  reset();
+  running = true;
+  lastTime = performance.now();
+  draw();
+  rafId = requestAnimationFrame(loop);
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === " ") { e.preventDefault(); flap(); }
+});
+canvas.addEventListener("pointerdown", flap);
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) endGame();
+});
+
+resize();
+best = Number(localStorage.getItem("flap-best") || 0);
+bestEl.textContent = best;
+</script>
+</body>
+</html>

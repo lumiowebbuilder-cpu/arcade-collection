@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>2048 — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #board {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    aspect-ratio: 1/1;
+    background: rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 10px;
+    touch-action: none;
+  }
+  .cell-bg { background: rgba(255,255,255,0.05); border-radius: 8px; }
+  .tile {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-weight: 800;
+    font-size: clamp(16px, 6vw, 30px);
+    transition: transform 0.12s ease, opacity 0.12s ease;
+    color: #0b0f2a;
+  }
+  .tile.spawn { animation: pop 0.15s ease; }
+  @keyframes pop { from { transform: scale(0.5); opacity: 0.4; } to { transform: scale(1); opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">2048</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SCORE <strong id="score">0</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <div id="board"></div>
+    <div class="overlay" id="overlay">
+      <h2>2048</h2>
+      <p>Swipe or use arrow keys. Combine matching tiles to reach 2048.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+  <p class="hint">New Game restarts anytime. Keep merging after 2048 to push your score higher.</p>
+  <button class="btn secondary" id="restartBtn">New Game</button>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const boardEl = document.getElementById("board");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+const SIZE = 4;
+let grid, score, best, won, over, cellPx, gapPx;
+
+const COLORS = {
+  2: "#eef2ff", 4: "#dbe8ff", 8: "#ffd7a8", 16: "#ffb877", 32: "#ff9a62",
+  64: "#ff7d54", 128: "#ffe17d", 256: "#ffd24d", 512: "#7cf7c9", 1024: "#4fd1ff", 2048: "#c77dff",
+};
+
+function emptyGrid() {
+  return Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
+}
+
+function layoutBg() {
+  boardEl.querySelectorAll(".cell-bg").forEach((n) => n.remove());
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const d = document.createElement("div");
+    d.className = "cell-bg";
+    boardEl.appendChild(d);
+  }
+}
+
+function measure() {
+  const rect = boardEl.getBoundingClientRect();
+  const pad = 10, gap = 10;
+  cellPx = (rect.width - pad * 2 - gap * (SIZE - 1)) / SIZE;
+  gapPx = gap;
+}
+
+function addRandomTile() {
+  const empties = [];
+  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) if (grid[r][c] === 0) empties.push([r, c]);
+  if (!empties.length) return false;
+  const [r, c] = empties[Math.floor(Math.random() * empties.length)];
+  grid[r][c] = Math.random() < 0.9 ? 2 : 4;
+  return true;
+}
+
+function render(spawned) {
+  boardEl.querySelectorAll(".tile").forEach((n) => n.remove());
+  measure();
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const v = grid[r][c];
+      if (!v) continue;
+      const t = document.createElement("div");
+      t.className = "tile" + (spawned && spawned.r === r && spawned.c === c ? " spawn" : "");
+      t.style.width = cellPx + "px";
+      t.style.height = cellPx + "px";
+      t.style.left = 10 + c * (cellPx + gapPx) + "px";
+      t.style.top = 10 + r * (cellPx + gapPx) + "px";
+      t.style.background = COLORS[v] || "#e0d1ff";
+      t.style.color = v <= 4 ? "#0b0f2a" : "#0b0f2a";
+      t.textContent = v;
+      boardEl.appendChild(t);
+    }
+  }
+  scoreEl.textContent = score;
+  if (score > best) {
+    best = score;
+    localStorage.setItem("2048-best", String(best));
+  }
+  bestEl.textContent = best;
+}
+
+function slideLine(line) {
+  const vals = line.filter((v) => v !== 0);
+  let gained = 0;
+  for (let i = 0; i < vals.length - 1; i++) {
+    if (vals[i] === vals[i + 1]) {
+      vals[i] *= 2;
+      gained += vals[i];
+      vals.splice(i + 1, 1);
+      if (vals[i] === 2048 && !won) won = true;
+    }
+  }
+  while (vals.length < SIZE) vals.push(0);
+  return { vals, gained };
+}
+
+function move(dir) {
+  if (over) return;
+  let moved = false;
+  let gained = 0;
+  const rotated = getLines(dir);
+  const results = rotated.map((line) => {
+    const before = line.join(",");
+    const { vals, gained: g } = slideLine(line);
+    gained += g;
+    if (vals.join(",") !== before) moved = true;
+    return vals;
+  });
+  setLines(dir, results);
+
+  if (moved) {
+    score += gained;
+    if (gained > 0) Sound.coin(); else Sound.move();
+    addRandomTile();
+    render();
+    if (won && !boardEl.dataset.wonShown) {
+      boardEl.dataset.wonShown = "1";
+      Sound.win();
+      showOverlay("You reached 2048!", "Keep going to raise your score, or start a new game.", true);
+    } else if (!hasMoves()) {
+      over = true;
+      Sound.bad();
+      showOverlay("Game Over", `Final score: ${score}`, false);
+    }
+  }
+}
+
+function getLines(dir) {
+  const lines = [];
+  for (let i = 0; i < SIZE; i++) {
+    let line;
+    if (dir === "left") line = grid[i].slice();
+    else if (dir === "right") line = grid[i].slice().reverse();
+    else if (dir === "up") line = grid.map((row) => row[i]);
+    else line = grid.map((row) => row[i]).reverse();
+    lines.push(line);
+  }
+  return lines;
+}
+
+function setLines(dir, lines) {
+  for (let i = 0; i < SIZE; i++) {
+    let line = lines[i];
+    if (dir === "right" || dir === "down") line = line.slice().reverse();
+    if (dir === "left" || dir === "right") grid[i] = line;
+    else for (let r = 0; r < SIZE; r++) grid[r][i] = line[r];
+  }
+}
+
+function hasMoves() {
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if (grid[r][c] === 0) return true;
+      if (c < SIZE - 1 && grid[r][c] === grid[r][c + 1]) return true;
+      if (r < SIZE - 1 && grid[r][c] === grid[r + 1][c]) return true;
+    }
+  }
+  return false;
+}
+
+function showOverlay(title, text, dismissOnly) {
+  overlay.innerHTML = `<h2>${title}</h2><p>${text}</p><button class="btn" id="ovBtn">${dismissOnly ? "Keep Playing" : "Try Again"}</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("ovBtn").addEventListener("click", () => {
+    if (dismissOnly) overlay.style.display = "none";
+    else start();
+  });
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  grid = emptyGrid();
+  score = 0;
+  won = false;
+  over = false;
+  delete boardEl.dataset.wonShown;
+  addRandomTile();
+  addRandomTile();
+  render();
+}
+
+window.addEventListener("keydown", (e) => {
+  const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+  if (map[e.key]) {
+    e.preventDefault();
+    move(map[e.key]);
+  }
+});
+
+let touchStart = null;
+boardEl.addEventListener("pointerdown", (e) => (touchStart = { x: e.clientX, y: e.clientY }));
+boardEl.addEventListener("pointerup", (e) => {
+  if (!touchStart) return;
+  const dx = e.clientX - touchStart.x;
+  const dy = e.clientY - touchStart.y;
+  touchStart = null;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+  if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? "right" : "left");
+  else move(dy > 0 ? "down" : "up");
+});
+
+document.getElementById("startBtn").addEventListener("click", start);
+document.getElementById("restartBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+window.addEventListener("resize", () => grid && render());
+
+layoutBg();
+best = Number(localStorage.getItem("2048-best") || 0);
+bestEl.textContent = best;
+grid = emptyGrid();
+render();
+</script>
+</body>
+</html>

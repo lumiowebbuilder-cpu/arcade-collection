@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Arcade Collection</title>
+<link rel="stylesheet" href="shared/style.css" />
+<style>
+  .hero { text-align: center; margin: 10px 0 4px; }
+  .hero h1 { font-size: 30px; margin: 0 0 8px; text-shadow: 0 0 24px rgba(124,247,201,0.4); }
+  .hero p { color: var(--text-dim); font-size: 14px; margin: 0; }
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; width: 100%; }
+  @media (min-width: 480px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 18px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+    transition: transform 0.12s, border-color 0.12s;
+  }
+  .tile:hover { transform: translateY(-3px); border-color: var(--accent); }
+  .tile .emoji { font-size: 30px; }
+  .tile .name { font-weight: 700; font-size: 14px; }
+  .tile .desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <h1>ARCADE COLLECTION</h1>
+    <p>Ten small games. Pick one.</p>
+  </div>
+  <div class="tiles">
+    <a class="home-tile" href="games/snake/index.html"><div class="tile"><div class="emoji">🐍</div><div class="name">Snake</div><div class="desc">Grow long, don't bite yourself</div></div></a>
+    <a class="home-tile" href="games/2048/index.html"><div class="tile"><div class="emoji">🔢</div><div class="name">2048</div><div class="desc">Slide &amp; merge to the target tile</div></div></a>
+    <a class="home-tile" href="games/breakout/index.html"><div class="tile"><div class="emoji">🧱</div><div class="name">Breakout</div><div class="desc">Paddle, ball, bricks</div></div></a>
+    <a class="home-tile" href="games/block-drop/index.html"><div class="tile"><div class="emoji">🟪</div><div class="name">Block Drop</div><div class="desc">Falling blocks, clear lines</div></div></a>
+    <a class="home-tile" href="games/memory-match/index.html"><div class="tile"><div class="emoji">🪐</div><div class="name">Memory Match</div><div class="desc">Flip cards, find pairs</div></div></a>
+    <a class="home-tile" href="games/minesweeper/index.html"><div class="tile"><div class="emoji">💣</div><div class="name">Minesweeper</div><div class="desc">Logic, flags, and nerve</div></div></a>
+    <a class="home-tile" href="games/flap/index.html"><div class="tile"><div class="emoji">🐤</div><div class="name">Flap</div><div class="desc">Thread the pipe gaps</div></div></a>
+    <a class="home-tile" href="games/platformer/index.html"><div class="tile"><div class="emoji">🏃</div><div class="name">Platformer</div><div class="desc">Run, jump, reach the flag</div></div></a>
+    <a class="home-tile" href="games/pong/index.html"><div class="tile"><div class="emoji">🏓</div><div class="name">Pong</div><div class="desc">Beat the CPU paddle</div></div></a>
+    <a class="home-tile" href="games/word-guess/index.html"><div class="tile"><div class="emoji">🔤</div><div class="name">Word Guess</div><div class="desc">Six tries to nail the word</div></div></a>
+  </div>
+</div>
+</body>
+</html>
