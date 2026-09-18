@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Word Tower — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 3/4; width: 100%; max-width: 420px; }
+  #timerBar { width: 100%; max-width: 420px; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  #timerFill { height: 100%; background: linear-gradient(90deg,#7cf7c9,#ffe17d); width: 100%; transition: width 0.08s linear, background 0.2s; }
+  .input-row { display: flex; gap: 8px; width: 100%; max-width: 420px; }
+  #wordInput { flex: 1; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--panel-border); background: rgba(255,255,255,0.06); color: var(--text); font-size: 16px; text-transform: lowercase; }
+  #wordInput:focus { outline: 2px solid var(--accent); }
+  #wordInput.shake { animation: shakeInput 0.3s; }
+  @keyframes shakeInput { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  #feedback { min-height: 18px; font-size: 12px; color: var(--danger); text-align: center; }
+  #chainHint { text-align: center; font-size: 14px; }
+  #chainHint strong { color: var(--accent2); font-size: 18px; }
+  #usedWords { max-height: 50px; overflow-y: auto; font-size: 11px; color: var(--text-dim); text-align: center; width: 100%; max-width: 420px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">WORD TOWER</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>HEIGHT <strong id="height">0</strong></div>
+    <div>LEAN <strong id="leanDisplay">0&deg;</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>WORD TOWER</h2>
+      <p>Type a word that starts with the last letter of the word before it. Longer words build wider, steadier blocks &mdash; short ones are fast but wobbly. Don't run out of time, don't topple.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+  <div id="chainHint">Type any word to begin</div>
+  <div id="timerBar"><div id="timerFill"></div></div>
+  <div class="input-row">
+    <input id="wordInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="type a word..." disabled />
+    <button class="btn" id="submitBtn" disabled>Stack</button>
+  </div>
+  <div id="feedback">&nbsp;</div>
+  <div id="usedWords"></div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const heightEl = document.getElementById("height");
+const leanDisplayEl = document.getElementById("leanDisplay");
+const bestEl = document.getElementById("best");
+const chainHintEl = document.getElementById("chainHint");
+const timerFill = document.getElementById("timerFill");
+const wordInput = document.getElementById("wordInput");
+const submitBtn = document.getElementById("submitBtn");
+const feedbackEl = document.getElementById("feedback");
+const usedWordsEl = document.getElementById("usedWords");
+const muteBtn = document.getElementById("muteBtn");
+
+const BLOCK_H = 20;
+const MAX_LEAN = 35;
+const STABILITY_K = 42;
+const BASE_TIME = 6.5;
+const COLORS = ["#7cf7c9", "#4fd1ff", "#ffe17d", "#ff9a62", "#c77dff", "#ff5c6c"];
+
+let blocks, lean, prevWord, usedWords, timeLeft, currentTime, running, best;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = rect.height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function isValidWord(word) {
+  word = word.toLowerCase().trim();
+  if (!/^[a-z]{2,}$/.test(word)) return { ok: false, reason: "Letters only, 2+ long" };
+  if (usedWords.has(word)) return { ok: false, reason: "Already used that one" };
+  if (prevWord && word[0] !== prevWord[prevWord.length - 1]) {
+    return { ok: false, reason: `Must start with "${prevWord[prevWord.length - 1].toUpperCase()}"` };
+  }
+  return { ok: true, word };
+}
+
+function blockWidthFor(len) {
+  const rect = canvas.getBoundingClientRect();
+  return Math.min(rect.width * 0.85, Math.max(40, 18 + len * 11));
+}
+
+function submitWord() {
+  if (!running) return;
+  const raw = wordInput.value;
+  const check = isValidWord(raw);
+  if (!check.ok) {
+    feedbackEl.textContent = check.reason;
+    Sound.bad();
+    wordInput.classList.add("shake");
+    return;
+  }
+  const word = check.word;
+  usedWords.add(word);
+  const width = blockWidthFor(word.length);
+  blocks.push({ width, color: COLORS[blocks.length % COLORS.length], word });
+  const leanDelta = (Math.random() * 2 - 1) * (STABILITY_K / word.length);
+  lean += leanDelta;
+  prevWord = word;
+  wordInput.value = "";
+  feedbackEl.textContent = "";
+  Sound.click();
+
+  currentTime = Math.max(2.5, BASE_TIME - blocks.length * 0.12);
+  timeLeft = currentTime;
+
+  updateHud();
+  draw();
+
+  if (Math.abs(lean) > MAX_LEAN) { endGame("topple"); return; }
+}
+
+function updateHud() {
+  heightEl.textContent = blocks.length;
+  leanDisplayEl.textContent = Math.round(lean) + "°";
+  bestEl.textContent = best;
+  chainHintEl.innerHTML = prevWord ? `Next word starts with <strong>${prevWord[prevWord.length - 1].toUpperCase()}</strong>` : "Type any word to begin";
+  usedWordsEl.textContent = [...usedWords].join(", ");
+}
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  const bg = ctx.createLinearGradient(0, 0, 0, rect.height);
+  bg.addColorStop(0, "#160a29"); bg.addColorStop(1, "#0b0f2a");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, rect.width, rect.height);
+  if (!blocks) return;
+
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(0, rect.height - 6, rect.width, 6);
+
+  ctx.save();
+  ctx.translate(rect.width / 2, rect.height - 6);
+  ctx.rotate((lean * Math.PI) / 180);
+  let y = 0;
+  for (const b of blocks) {
+    ctx.fillStyle = b.color;
+    ctx.shadowColor = b.color;
+    ctx.shadowBlur = 4;
+    ctx.fillRect(-b.width / 2, y - BLOCK_H, b.width, BLOCK_H - 1.5);
+    ctx.shadowBlur = 0;
+    y -= BLOCK_H;
+  }
+  ctx.restore();
+}
+
+function endGame(reason) {
+  running = false;
+  Sound.bad();
+  wordInput.disabled = true;
+  submitBtn.disabled = true;
+  if (blocks.length > best) { best = blocks.length; localStorage.setItem("wordtower-best", String(best)); }
+  const msg = reason === "topple" ? "The tower toppled!" : "Time ran out!";
+  overlay.innerHTML = `<h2>${msg}</h2><p>Height reached: ${blocks.length} blocks${blocks.length===best?" — New best!":""}</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  updateHud();
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.05);
+  lastTime = t;
+  if (running && blocks.length > 0) {
+    timeLeft -= dt;
+    timerFill.style.width = Math.max(0, (timeLeft / currentTime) * 100) + "%";
+    timerFill.style.background = timeLeft / currentTime < 0.3 ? "#ff5c6c" : "linear-gradient(90deg,#7cf7c9,#ffe17d)";
+    if (timeLeft <= 0) { endGame("timeout"); }
+  }
+  requestAnimationFrame(loop);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  blocks = [];
+  lean = 0;
+  prevWord = null;
+  usedWords = new Set();
+  running = true;
+  currentTime = BASE_TIME;
+  timeLeft = 999;
+  wordInput.disabled = false;
+  submitBtn.disabled = false;
+  wordInput.value = "";
+  feedbackEl.textContent = "";
+  timerFill.style.width = "100%";
+  updateHud();
+  draw();
+  wordInput.focus();
+}
+
+submitBtn.addEventListener("click", submitWord);
+wordInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitWord(); });
+wordInput.addEventListener("animationend", () => wordInput.classList.remove("shake"));
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) { running = false; overlay.innerHTML = `<h2>Paused</h2><p>Height: ${blocks.length}</p><button class="btn" id="resumeBtn">Resume</button>`; overlay.style.display = "flex"; document.getElementById("resumeBtn").addEventListener("click", () => { overlay.style.display = "none"; running = true; lastTime = performance.now(); wordInput.focus(); }); }
+});
+
+best = Number(localStorage.getItem("wordtower-best") || 0);
+blocks = [];
+lean = 0;
+resize();
+lastTime = performance.now();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

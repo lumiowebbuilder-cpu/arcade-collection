@@ -1,8 +1,8 @@
 # Arcade Collection
 
-Twenty small, dependency-free browser games. Each one is a single self-contained
-HTML file (inline CSS/JS, no build step, no framework) sharing a small common
-stylesheet and a synthesized Web Audio sound effects helper.
+Twenty-five small, dependency-free browser games. Each one is a single
+self-contained HTML file (inline CSS/JS, no build step, no framework) sharing
+a small common stylesheet and a synthesized Web Audio sound effects helper.
 
 ## Quick arcade games
 
@@ -47,6 +47,28 @@ stylesheet and a synthesized Web Audio sound effects helper.
 - **Solitaire** — full Klondike: tableau sequences, foundations, stock/waste
   recycling, double-click-to-foundation
 
+## Never seen before
+
+Five original mechanics, not reskins of existing genres:
+
+- **Orbit Golf** — mini-golf where you place gravity wells (attractors/
+  repulsors) before each shot; the ball's path bends through them like
+  orbital mechanics instead of traveling in a straight line
+- **Word Tower** — a Shiritori-style word chain where each accepted word
+  becomes a stacked block (width scales with word length); short words are
+  fast to type but destabilize the tower's balance more, long words are
+  slower but steadier — the tower topples if your lean goes too far
+- **Echo Maze** — the maze is pitch black; ping to briefly reveal your
+  surroundings sonar-style, but a hunter creature paths toward every ping
+  you make using the same maze-solving BFS it takes to find you
+- **Rewind Runner** — a ghost replays your exact movements from 3 seconds in
+  the past; press a switch now so your future ghost holds a gate open for
+  present-you later, requiring you to plan around your own delayed echo
+- **Field Runner** — the dot you're steering is not your mouse cursor: it
+  springs toward your real pointer position while also being deflected by
+  magnetic fields, so reaching the goal means anticipating the drift instead
+  of aiming directly
+
 Each game tracks its own high score / best stat in `localStorage`.
 
 ## Running locally
@@ -59,4 +81,4 @@ node server.js
 ```
 
 Then open [http://localhost:3500](http://localhost:3500) for the hub page
-linking to all twenty games.
+linking to all twenty-five games.

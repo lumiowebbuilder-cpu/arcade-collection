@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Field Runner — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 4/3; width: 100%; max-width: 560px; touch-action: none; cursor: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">FIELD RUNNER</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>LEVEL <strong id="levelNum">1</strong>/5</div>
+    <div>ATTEMPTS <strong id="attempts">0</strong></div>
+    <div>TIME <strong id="time">0:00</strong></div>
+    <div>BEST <strong id="best">&mdash;</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>FIELD RUNNER</h2>
+      <p>Your real mouse and the dot you're steering are not the same thing. The dot springs toward your cursor but magnetic fields bend it off course. Anticipate the drift &mdash; guide the dot into the green goal. Avoid red.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const levelNumEl = document.getElementById("levelNum");
+const attemptsEl = document.getElementById("attempts");
+const timeEl = document.getElementById("time");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const W = 560, H = 420;
+const SPRING_K = 16, DAMPING = 6;
+const HOLD_TIME = 0.5;
+const DOT_R = 8;
+
+const LEVELS = [
+  { start: { x: 60, y: 210 }, zones: [{ x: 300, y: 210, r: 90, type: "goal" }] },
+  { start: { x: 60, y: 60 }, zones: [{ x: 280, y: 210, r: 100, type: "attract", strength: 4500 }, { x: 500, y: 360, r: 60, type: "goal" }] },
+  { start: { x: 60, y: 60 }, zones: [{ x: 280, y: 150, r: 90, type: "repel", strength: 5500 }, { x: 500, y: 60, r: 55, type: "goal" }] },
+  { start: { x: 40, y: 210 }, zones: [
+      { x: 220, y: 120, r: 80, type: "attract", strength: 5000 },
+      { x: 220, y: 300, r: 80, type: "repel", strength: 5500 },
+      { x: 400, y: 210, r: 55, type: "hazard" },
+      { x: 520, y: 210, r: 50, type: "goal" },
+    ] },
+  { start: { x: 40, y: 40 }, zones: [
+      { x: 200, y: 100, r: 70, type: "repel", strength: 6000 },
+      { x: 380, y: 320, r: 70, type: "attract", strength: 4500 },
+      { x: 300, y: 60, r: 45, type: "hazard" },
+      { x: 470, y: 100, r: 45, type: "hazard" },
+      { x: 520, y: 360, r: 50, type: "goal" },
+    ] },
+];
+
+let level, dot, vel, mouse, zones, holdTimer, attempts, running, startTime, timerId, best;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = (rect.width * H / W) * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = (rect.width * H / W) + "px";
+  ctx.setTransform(dpr * (rect.width / W), 0, 0, dpr * (rect.width / W), 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function loadLevel(idx) {
+  const L = LEVELS[idx];
+  dot = { x: L.start.x, y: L.start.y };
+  vel = { x: 0, y: 0 };
+  mouse = { x: L.start.x, y: L.start.y };
+  zones = L.zones;
+  holdTimer = 0;
+  attempts = 0;
+  attemptsEl.textContent = 0;
+}
+
+function resetDot() {
+  const L = LEVELS[level];
+  dot.x = L.start.x; dot.y = L.start.y;
+  vel.x = 0; vel.y = 0;
+  holdTimer = 0;
+  attempts++;
+  attemptsEl.textContent = attempts;
+  Sound.bad();
+}
+
+function update(dt) {
+  if (!running) return;
+  const fx0 = SPRING_K * (mouse.x - dot.x);
+  const fy0 = SPRING_K * (mouse.y - dot.y);
+  let fx = fx0, fy = fy0;
+
+  for (const z of zones) {
+    if (z.type !== "attract" && z.type !== "repel") continue;
+    const dx = z.x - dot.x, dy = z.y - dot.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > z.r || dist < 0.001) continue;
+    const falloff = 1 - dist / z.r;
+    const mag = z.strength * falloff;
+    const dir = z.type === "attract" ? 1 : -1;
+    fx += dir * mag * dx / dist;
+    fy += dir * mag * dy / dist;
+  }
+
+  vel.x += fx * dt;
+  vel.y += fy * dt;
+  vel.x *= (1 - DAMPING * dt);
+  vel.y *= (1 - DAMPING * dt);
+  dot.x += vel.x * dt;
+  dot.y += vel.y * dt;
+  dot.x = Math.max(DOT_R, Math.min(W - DOT_R, dot.x));
+  dot.y = Math.max(DOT_R, Math.min(H - DOT_R, dot.y));
+
+  for (const z of zones) {
+    const dist = Math.hypot(z.x - dot.x, z.y - dot.y);
+    if (z.type === "hazard" && dist < z.r + DOT_R) { resetDot(); return; }
+    if (z.type === "goal" && dist < z.r) {
+      holdTimer += dt;
+      if (holdTimer >= HOLD_TIME) { winLevel(); return; }
+    } else if (z.type === "goal") {
+      holdTimer = Math.max(0, holdTimer - dt * 2);
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#05061a";
+  ctx.fillRect(0, 0, W, H);
+  if (!dot) return;
+
+  for (const z of zones) {
+    const colors = { attract: "#4fd1ff", repel: "#ff9a62", hazard: "#ff5c6c", goal: "#7cf7c9" };
+    ctx.strokeStyle = colors[z.type] + (z.type === "goal" ? "" : "80");
+    ctx.fillStyle = colors[z.type] + "18";
+    ctx.lineWidth = z.type === "goal" ? 3 : 1.5;
+    ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (z.type === "hazard") {
+      ctx.fillStyle = "#ff5c6c";
+      ctx.font = `${z.r * 0.7}px sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("×", z.x, z.y);
+    }
+  }
+
+  const goal = zones.find((z) => z.type === "goal");
+  if (goal && holdTimer > 0) {
+    ctx.strokeStyle = "#7cf7c9";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(goal.x, goal.y, goal.r + 8, -Math.PI / 2, -Math.PI / 2 + (holdTimer / HOLD_TIME) * Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+  ctx.beginPath();
+  ctx.arc(mouse.x, mouse.y, 5, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = "#ffe17d";
+  ctx.shadowColor = "#ffe17d"; ctx.shadowBlur = 12;
+  ctx.beginPath();
+  ctx.arc(dot.x, dot.y, DOT_R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function winLevel() {
+  running = false;
+  Sound.win();
+  const isLast = level === LEVELS.length - 1;
+  if (isLast) {
+    clearInterval(timerId);
+    const elapsed = Date.now() - startTime;
+    if (!best || elapsed < best) { best = elapsed; localStorage.setItem("fieldrunner-best", String(best)); }
+    overlay.innerHTML = `<h2>All levels cleared!</h2><p>${formatTime(elapsed)} total</p><button class="btn" id="startBtn2">Play Again</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("startBtn2").addEventListener("click", start);
+  } else {
+    overlay.innerHTML = `<h2>Level ${level + 1} clear!</h2><p>${attempts} attempt${attempts===1?"":"s"}</p><button class="btn" id="nextBtn">Next</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      overlay.style.display = "none";
+      level++;
+      levelNumEl.textContent = level + 1;
+      loadLevel(level);
+      running = true;
+      draw();
+    });
+  }
+}
+
+function formatTime(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.033);
+  lastTime = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function canvasPoint(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (clientX - rect.left) / rect.width * W, y: (clientY - rect.top) / rect.width * W * (H / W) };
+}
+canvas.addEventListener("pointermove", (e) => { mouse = canvasPoint(e.clientX, e.clientY); });
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  level = 0;
+  levelNumEl.textContent = 1;
+  loadLevel(0);
+  running = true;
+  startTime = Date.now();
+  clearInterval(timerId);
+  timerId = setInterval(() => { timeEl.textContent = formatTime(Date.now() - startTime); }, 1000);
+  timeEl.textContent = "0:00";
+  draw();
+}
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("fieldrunner-best") || 0) || null;
+resize();
+lastTime = performance.now();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

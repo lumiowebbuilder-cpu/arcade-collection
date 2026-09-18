@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Orbit Golf — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 11/14; width: 100%; max-width: 460px; touch-action: none; }
+  .well-toolbar { display: flex; gap: 8px; align-items: center; justify-content: center; }
+  .well-toolbar button { flex: 1; }
+  .well-toolbar button.active { outline: 2px solid var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">ORBIT GOLF</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>HOLE <strong id="holeNum">1</strong>/5</div>
+    <div>STROKES <strong id="strokes">0</strong></div>
+    <div>PAR <strong id="par">3</strong></div>
+    <div>BEST <strong id="best">&mdash;</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>ORBIT GOLF</h2>
+      <p>Place gravity wells to bend the ball's path, then drag from the ball to aim &amp; release to putt. Sink it in as few strokes as you can.</p>
+      <button class="btn" id="startBtn">Tee Off</button>
+    </div>
+  </div>
+  <div class="well-toolbar">
+    <button class="btn secondary active" id="attractBtn">🔵 Attract</button>
+    <button class="btn secondary" id="repelBtn">🟠 Repel</button>
+    <span id="wellCount" class="hint" style="white-space:nowrap;">Wells 0/3</span>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const strokesEl = document.getElementById("strokes");
+const parEl = document.getElementById("par");
+const holeNumEl = document.getElementById("holeNum");
+const bestEl = document.getElementById("best");
+const wellCountEl = document.getElementById("wellCount");
+const muteBtn = document.getElementById("muteBtn");
+const attractBtn = document.getElementById("attractBtn");
+const repelBtn = document.getElementById("repelBtn");
+
+const W = 440, H = 560;
+const BALL_R = 8, HOLE_R = 14;
+const WELL_STRENGTH = 2000000;
+const MAX_SPEED = 420;
+
+const LEVELS = [
+  { ball: { x: 60, y: 500 }, hole: { x: 380, y: 80 }, walls: [], maxWells: 2, par: 2 },
+  { ball: { x: 60, y: 500 }, hole: { x: 60, y: 80 }, walls: [{ x: 0, y: 280, w: 300, h: 20 }], maxWells: 2, par: 3 },
+  { ball: { x: 220, y: 500 }, hole: { x: 220, y: 60 }, walls: [{ x: 0, y: 260, w: 180, h: 20 }, { x: 260, y: 340, w: 180, h: 20 }], maxWells: 3, par: 3 },
+  { ball: { x: 40, y: 500 }, hole: { x: 400, y: 500 }, walls: [{ x: 190, y: 0, w: 20, h: 420 }], maxWells: 3, par: 3 },
+  { ball: { x: 220, y: 520 }, hole: { x: 220, y: 40 }, walls: [{ x: 0, y: 340, w: 260, h: 20 }, { x: 180, y: 180, w: 260, h: 20 }], maxWells: 3, par: 4 },
+];
+
+let level, ball, wells, wellType, holeInfo, walls, maxWells, strokes, totalStrokes, running, aiming, aimPoint, best, preShot;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = (rect.width * H / W) * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = (rect.width * H / W) + "px";
+  ctx.setTransform(dpr * (rect.width / W), 0, 0, dpr * (rect.width / W), 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function loadLevel(idx) {
+  const L = LEVELS[idx];
+  ball = { x: L.ball.x, y: L.ball.y, vx: 0, vy: 0, moving: false };
+  holeInfo = L.hole;
+  walls = L.walls;
+  maxWells = L.maxWells;
+  wells = [];
+  strokes = 0;
+  wellType = "attract";
+  updateHud();
+  draw();
+}
+
+function updateHud() {
+  strokesEl.textContent = strokes;
+  parEl.textContent = LEVELS[level].par;
+  holeNumEl.textContent = level + 1;
+  wellCountEl.textContent = `Wells ${wells.length}/${maxWells}`;
+  bestEl.textContent = best ? String(best) : "—";
+}
+
+function circleRectCollision(cx, cy, cr, rect) {
+  const nearestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+  const nearestY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+  const dx = cx - nearestX, dy = cy - nearestY;
+  return { hit: dx * dx + dy * dy < cr * cr, nearestX, nearestY, dx, dy };
+}
+
+function update(dt) {
+  if (!running || !ball.moving) return;
+
+  let ax = 0, ay = 0;
+  for (const w of wells) {
+    let dx = w.x - ball.x, dy = w.y - ball.y;
+    let dist = Math.hypot(dx, dy);
+    dist = Math.max(dist, 22);
+    const force = (w.type === "attract" ? 1 : -1) * WELL_STRENGTH / (dist * dist);
+    ax += force * dx / dist;
+    ay += force * dy / dist;
+  }
+  ball.vx += ax * dt;
+  ball.vy += ay * dt;
+  ball.vx *= (1 - 0.12 * dt);
+  ball.vy *= (1 - 0.12 * dt);
+
+  const speed = Math.hypot(ball.vx, ball.vy);
+  if (speed > MAX_SPEED) { ball.vx = ball.vx / speed * MAX_SPEED; ball.vy = ball.vy / speed * MAX_SPEED; }
+
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+
+  for (const rect of walls) {
+    const col = circleRectCollision(ball.x, ball.y, BALL_R, rect);
+    if (col.hit) {
+      const overlapX = Math.min(ball.x + BALL_R - rect.x, rect.x + rect.w - (ball.x - BALL_R));
+      const overlapY = Math.min(ball.y + BALL_R - rect.y, rect.y + rect.h - (ball.y - BALL_R));
+      if (overlapX < overlapY) { ball.vx *= -0.7; ball.x += col.dx > 0 ? overlapX : -overlapX; }
+      else { ball.vy *= -0.7; ball.y += col.dy > 0 ? overlapY : -overlapY; }
+      Sound.click();
+    }
+  }
+
+  if (Math.hypot(ball.x - holeInfo.x, ball.y - holeInfo.y) < HOLE_R) {
+    sinkBall();
+    return;
+  }
+
+  if (ball.x < -20 || ball.x > W + 20 || ball.y < -20 || ball.y > H + 20) {
+    Sound.bad();
+    ball.x = preShot.x; ball.y = preShot.y; ball.vx = 0; ball.vy = 0; ball.moving = false;
+    wells = [];
+    updateHud();
+    return;
+  }
+
+  if (Math.hypot(ball.vx, ball.vy) < 4) {
+    ball.vx = 0; ball.vy = 0; ball.moving = false;
+    wells = [];
+    updateHud();
+  }
+}
+
+function sinkBall() {
+  ball.moving = false;
+  running = false;
+  Sound.win();
+  totalStrokes += strokes;
+  const isLast = level === LEVELS.length - 1;
+  if (isLast) {
+    if (!best || totalStrokes < best) { best = totalStrokes; localStorage.setItem("orbitgolf-best", String(best)); }
+    overlay.innerHTML = `<h2>Round Complete!</h2><p>Total strokes: ${totalStrokes}${totalStrokes===best?" — New best!":""}</p><button class="btn" id="startBtn2">Play Again</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("startBtn2").addEventListener("click", start);
+  } else {
+    overlay.innerHTML = `<h2>Hole ${level+1} — ${strokes} stroke${strokes===1?"":"s"}</h2><p>Par was ${LEVELS[level].par}.</p><button class="btn" id="nextBtn">Next Hole</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      overlay.style.display = "none";
+      level++;
+      running = true;
+      loadLevel(level);
+    });
+  }
+  updateHud();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#0b2a1e"); bg.addColorStop(1, "#0b0f2a");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  if (!ball) return;
+
+  ctx.fillStyle = "#1c2560";
+  for (const rect of walls) ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+
+  ctx.fillStyle = "#05061a";
+  ctx.beginPath(); ctx.arc(holeInfo.x, holeInfo.y, HOLE_R, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "#ffe17d"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(holeInfo.x, holeInfo.y, HOLE_R, 0, Math.PI * 2); ctx.stroke();
+
+  for (const w of wells) {
+    ctx.strokeStyle = w.type === "attract" ? "rgba(79,209,255,0.5)" : "rgba(255,154,98,0.5)";
+    ctx.lineWidth = 1.5;
+    for (const r of [16, 30, 44]) { ctx.beginPath(); ctx.arc(w.x, w.y, r, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = w.type === "attract" ? "#4fd1ff" : "#ff9a62";
+    ctx.beginPath(); ctx.arc(w.x, w.y, 7, 0, Math.PI * 2); ctx.fill();
+  }
+
+  if (aiming && !ball.moving) {
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(ball.x, ball.y); ctx.lineTo(aimPoint.x, aimPoint.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.fillStyle = "#fff";
+  ctx.shadowColor = "#fff"; ctx.shadowBlur = 6;
+  ctx.beginPath(); ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.02);
+  lastTime = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function canvasPoint(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (clientX - rect.left) / rect.width * W, y: (clientY - rect.top) / rect.width * W * (H / W) };
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (!running) return;
+  const p = canvasPoint(e.clientX, e.clientY);
+  if (!ball.moving && Math.hypot(p.x - ball.x, p.y - ball.y) < 26) {
+    aiming = true;
+    aimPoint = p;
+  } else if (!ball.moving && wells.length < maxWells) {
+    if (Math.hypot(p.x - ball.x, p.y - ball.y) < 40 || Math.hypot(p.x - holeInfo.x, p.y - holeInfo.y) < 40) return;
+    wells.push({ x: p.x, y: p.y, type: wellType });
+    Sound.click();
+    updateHud();
+    draw();
+  }
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!aiming) return;
+  aimPoint = canvasPoint(e.clientX, e.clientY);
+  draw();
+});
+canvas.addEventListener("pointerup", (e) => {
+  if (!aiming) return;
+  aiming = false;
+  const p = canvasPoint(e.clientX, e.clientY);
+  const dx = p.x - ball.x, dy = p.y - ball.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist > 8) {
+    preShot = { x: ball.x, y: ball.y };
+    ball.vx = (dx / dist) * Math.min(dist * 3.2, 360);
+    ball.vy = (dy / dist) * Math.min(dist * 3.2, 360);
+    ball.moving = true;
+    strokes++;
+    Sound.move();
+    updateHud();
+  }
+  draw();
+});
+
+attractBtn.addEventListener("click", () => { wellType = "attract"; attractBtn.classList.add("active"); repelBtn.classList.remove("active"); });
+repelBtn.addEventListener("click", () => { wellType = "repel"; repelBtn.classList.add("active"); attractBtn.classList.remove("active"); });
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  level = 0;
+  totalStrokes = 0;
+  running = true;
+  loadLevel(0);
+}
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("orbitgolf-best") || 0) || null;
+resize();
+lastTime = performance.now();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Echo Maze — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 1/1; width: 100%; max-width: 480px; touch-action: none; }
+  .touch-controls { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 6px; }
+  .touch-controls button { border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); border-radius: 10px; font-size: 18px; }
+  .touch-controls button:active { background: rgba(124,247,201,0.25); }
+  #pingBtn { background: rgba(79,209,255,0.15); border-color: rgba(79,209,255,0.4); color: #4fd1ff; font-weight: 700; }
+  .controls-row { display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">ECHO MAZE</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>PINGS <strong id="pings">0</strong></div>
+    <div>TIME <strong id="time">0:00</strong></div>
+    <div>BEST <strong id="best">&mdash;</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>ECHO MAZE</h2>
+      <p>It's pitch dark. Space or tap PING to briefly light up your surroundings &mdash; but the hunter homes in on every ping you make. Reach the gold exit.</p>
+      <button class="btn" id="startBtn">Enter</button>
+    </div>
+  </div>
+  <div class="controls-row">
+    <div class="touch-controls" id="pad">
+      <span></span><button data-d="up">&uarr;</button><span></span>
+      <button data-d="left">&larr;</button><button id="pingBtn">PING</button><button data-d="right">&rarr;</button>
+      <span></span><button data-d="down">&darr;</button><span></span>
+    </div>
+  </div>
+  <p class="hint">Arrow keys / WASD to move, Space or click PING to ping.</p>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const COLS = 13, ROWS = 13;
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const pingsEl = document.getElementById("pings");
+const timeEl = document.getElementById("time");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const PING_RADIUS = 3.2;
+const FADE_DURATION = 2.2;
+const HUNTER_MOVE_INTERVAL = 0.45;
+
+let maze, player, goal, hunter, pings, pingCount, running, startTime, timerId, best, cellPx, hunterTimer;
+
+function key(x, y) { return x + "," + y; }
+
+function generateMaze() {
+  const cells = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => ({ N: true, S: true, E: true, W: true, visited: false })));
+  const stack = [{ x: 0, y: 0 }];
+  cells[0][0].visited = true;
+  const dirs = [["N", 0, -1, "S"], ["S", 0, 1, "N"], ["E", 1, 0, "W"], ["W", -1, 0, "E"]];
+  while (stack.length) {
+    const cur = stack[stack.length - 1];
+    const options = [];
+    for (const [d, dx, dy, opp] of dirs) {
+      const nx = cur.x + dx, ny = cur.y + dy;
+      if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && !cells[ny][nx].visited) options.push({ d, dx, dy, opp, nx, ny });
+    }
+    if (options.length === 0) { stack.pop(); continue; }
+    const choice = options[Math.floor(Math.random() * options.length)];
+    cells[cur.y][cur.x][choice.d] = false;
+    cells[choice.ny][choice.nx][choice.opp] = false;
+    cells[choice.ny][choice.nx].visited = true;
+    stack.push({ x: choice.nx, y: choice.ny });
+  }
+  return cells;
+}
+
+function neighbors(x, y) {
+  const c = maze[y][x];
+  const list = [];
+  if (!c.N) list.push({ x, y: y - 1 });
+  if (!c.S) list.push({ x, y: y + 1 });
+  if (!c.E) list.push({ x: x + 1, y });
+  if (!c.W) list.push({ x: x - 1, y });
+  return list;
+}
+
+function bfsNextStep(from, to) {
+  if (from.x === to.x && from.y === to.y) return null;
+  const visited = new Set([key(from.x, from.y)]);
+  const queue = [[from.x, from.y, []]];
+  let head = 0;
+  while (head < queue.length) {
+    const [cx, cy, path] = queue[head++];
+    if (cx === to.x && cy === to.y) return path[0] || null;
+    for (const n of neighbors(cx, cy)) {
+      const k = key(n.x, n.y);
+      if (visited.has(k)) continue;
+      visited.add(k);
+      queue.push([n.x, n.y, [...path, { x: n.x, y: n.y }]]);
+    }
+  }
+  return null;
+}
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = rect.height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cellPx = rect.width / COLS;
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function doPing() {
+  if (!running) return;
+  pings.push({ x: player.x, y: player.y, time: performance.now() });
+  pingCount++;
+  pingsEl.textContent = pingCount;
+  Sound.click();
+  hunter.target = { x: player.x, y: player.y };
+  draw();
+}
+
+function tryMove(dx, dy) {
+  if (!running) return;
+  const c = maze[player.y][player.x];
+  if (dx === 1 && c.E) return;
+  if (dx === -1 && c.W) return;
+  if (dy === 1 && c.S) return;
+  if (dy === -1 && c.N) return;
+  player.x += dx; player.y += dy;
+  Sound.move();
+  if (player.x === goal.x && player.y === goal.y) { win(); return; }
+  if (player.x === hunter.x && player.y === hunter.y) { lose(); return; }
+  draw();
+}
+
+function updateHunter(dt) {
+  if (!running) return;
+  hunterTimer -= dt;
+  if (hunterTimer > 0) return;
+  hunterTimer = HUNTER_MOVE_INTERVAL;
+
+  if (hunter.target) {
+    const step = bfsNextStep({ x: hunter.x, y: hunter.y }, hunter.target);
+    if (step) { hunter.x = step.x; hunter.y = step.y; }
+    if (hunter.x === hunter.target.x && hunter.y === hunter.target.y) hunter.target = null;
+  } else {
+    const opts = neighbors(hunter.x, hunter.y);
+    if (opts.length) { const n = opts[Math.floor(Math.random() * opts.length)]; hunter.x = n.x; hunter.y = n.y; }
+  }
+  if (hunter.x === player.x && hunter.y === player.y) { lose(); return; }
+  draw();
+}
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "#020208";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+  if (!maze) return;
+
+  const now = performance.now();
+  function visibilityAt(cx, cy) {
+    let maxAlpha = 0;
+    for (const p of pings) {
+      const age = (now - p.time) / 1000;
+      if (age > FADE_DURATION) continue;
+      const dist = Math.hypot(cx - p.x, cy - p.y);
+      if (dist > PING_RADIUS) continue;
+      const fade = 1 - age / FADE_DURATION;
+      const falloff = 1 - dist / PING_RADIUS;
+      maxAlpha = Math.max(maxAlpha, fade * falloff);
+    }
+    return maxAlpha;
+  }
+
+  ctx.strokeStyle = "#7cf7c9";
+  ctx.lineCap = "round";
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const alpha = visibilityAt(x, y);
+      if (alpha <= 0.02) continue;
+      const c = maze[y][x];
+      const px = x * cellPx, py = y * cellPx;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (c.N) { ctx.moveTo(px, py); ctx.lineTo(px + cellPx, py); }
+      if (c.S) { ctx.moveTo(px, py + cellPx); ctx.lineTo(px + cellPx, py + cellPx); }
+      if (c.W) { ctx.moveTo(px, py); ctx.lineTo(px, py + cellPx); }
+      if (c.E) { ctx.moveTo(px + cellPx, py); ctx.lineTo(px + cellPx, py + cellPx); }
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  const goalAlpha = visibilityAt(goal.x, goal.y);
+  if (goalAlpha > 0.02) {
+    ctx.globalAlpha = goalAlpha;
+    ctx.fillStyle = "#ffe17d";
+    ctx.shadowColor = "#ffe17d"; ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc((goal.x + 0.5) * cellPx, (goal.y + 0.5) * cellPx, cellPx * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  const hunterAlpha = visibilityAt(hunter.x, hunter.y);
+  if (hunterAlpha > 0.02) {
+    ctx.globalAlpha = hunterAlpha;
+    ctx.fillStyle = "#ff5c6c";
+    ctx.shadowColor = "#ff5c6c"; ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc((hunter.x + 0.5) * cellPx, (hunter.y + 0.5) * cellPx, cellPx * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.fillStyle = "#4fd1ff";
+  ctx.shadowColor = "#4fd1ff"; ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.arc((player.x + 0.5) * cellPx, (player.y + 0.5) * cellPx, cellPx * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function win() {
+  running = false;
+  clearInterval(timerId);
+  Sound.win();
+  const elapsed = Date.now() - startTime;
+  let note = "";
+  if (!best || elapsed < best) { best = elapsed; localStorage.setItem("echomaze-best", String(best)); note = " — New best!"; }
+  overlay.innerHTML = `<h2>Escaped!</h2><p>${formatTime(elapsed)} &middot; ${pingCount} pings${note}</p><button class="btn" id="startBtn2">Play Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+}
+
+function lose() {
+  running = false;
+  clearInterval(timerId);
+  Sound.bad();
+  overlay.innerHTML = `<h2>Caught!</h2><p>The hunter found you after ${pingCount} pings.</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  draw();
+}
+
+function formatTime(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.05);
+  lastTime = t;
+  updateHunter(dt);
+  if (running) draw();
+  requestAnimationFrame(loop);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  maze = generateMaze();
+  player = { x: 0, y: 0 };
+  goal = { x: COLS - 1, y: ROWS - 1 };
+  let hx, hy;
+  do { hx = Math.floor(Math.random() * COLS); hy = Math.floor(Math.random() * ROWS); }
+  while (Math.hypot(hx, hy) < COLS * 0.5);
+  hunter = { x: hx, y: hy, target: null };
+  hunterTimer = HUNTER_MOVE_INTERVAL;
+  pings = [];
+  pingCount = 0;
+  pingsEl.textContent = 0;
+  running = true;
+  startTime = Date.now();
+  clearInterval(timerId);
+  timerId = setInterval(() => { timeEl.textContent = formatTime(Date.now() - startTime); }, 1000);
+  timeEl.textContent = "0:00";
+  doPing();
+  draw();
+}
+
+window.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (["arrowup","arrowdown","arrowleft","arrowright"," ","w","a","s","d"].includes(k)) e.preventDefault();
+  if (k === "arrowup" || k === "w") tryMove(0, -1);
+  else if (k === "arrowdown" || k === "s") tryMove(0, 1);
+  else if (k === "arrowleft" || k === "a") tryMove(-1, 0);
+  else if (k === "arrowright" || k === "d") tryMove(1, 0);
+  else if (k === " ") doPing();
+});
+document.getElementById("pad").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-d]");
+  if (btn) { const m = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }; tryMove(...m[btn.dataset.d]); }
+});
+document.getElementById("pingBtn").addEventListener("click", doPing);
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) {
+    running = false;
+    clearInterval(timerId);
+    const elapsedAtPause = Date.now() - startTime;
+    overlay.innerHTML = `<h2>Paused</h2><p>${pingCount} pings so far</p><button class="btn" id="resumeBtn">Resume</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("resumeBtn").addEventListener("click", () => {
+      overlay.style.display = "none";
+      running = true;
+      startTime = Date.now() - elapsedAtPause;
+      lastTime = performance.now();
+      timerId = setInterval(() => { timeEl.textContent = formatTime(Date.now() - startTime); }, 1000);
+    });
+  }
+});
+
+best = Number(localStorage.getItem("echomaze-best") || 0) || null;
+resize();
+lastTime = performance.now();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
