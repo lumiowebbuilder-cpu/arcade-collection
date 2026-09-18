@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Bastion — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 14/9; width: 100%; max-width: 620px; touch-action: none; }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 620px; }
+  .tower-btn { flex: 1; min-width: 70px; border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); border-radius: 10px; padding: 8px 4px; font-size: 11px; cursor: pointer; text-align: center; }
+  .tower-btn.active { border-color: var(--accent); background: rgba(124,247,201,0.15); }
+  .tower-btn .icon { font-size: 18px; }
+  .tower-btn .cost { color: var(--accent2); font-weight: 700; }
+  #selPanel { width: 100%; max-width: 620px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 10px; font-size: 12px; display: none; flex-direction: column; gap: 6px; }
+  #selPanel .row { display: flex; justify-content: space-between; align-items: center; }
+  #selPanel button { border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">BASTION</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>GOLD <strong id="gold">0</strong></div>
+    <div>LIVES <strong id="lives">0</strong></div>
+    <div>WAVE <strong id="wave">0</strong>/<span id="waveTotal">15</span></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>BASTION</h2>
+      <p>Place towers along the path to stop 15 waves of invaders. Pick a tower, tap an empty tile. Tap a tower to upgrade or sell.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+  <div class="toolbar" id="toolbar"></div>
+  <div id="selPanel"></div>
+  <button class="btn" id="waveBtn">Start Wave 1</button>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const COLS = 14, ROWS = 9;
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const goldEl = document.getElementById("gold");
+const livesEl = document.getElementById("lives");
+const waveEl = document.getElementById("wave");
+const bestEl = document.getElementById("best");
+const toolbar = document.getElementById("toolbar");
+const selPanel = document.getElementById("selPanel");
+const waveBtn = document.getElementById("waveBtn");
+const muteBtn = document.getElementById("muteBtn");
+
+const TOWER_TYPES = {
+  arrow: { name: "Arrow", icon: "🏹", cost: 40, range: 2.6, fireRate: 2.2, damage: 9, splash: 0, slow: 0, color: "#7cf7c9" },
+  cannon: { name: "Cannon", icon: "💣", cost: 70, range: 2.2, fireRate: 0.9, damage: 22, splash: 1.1, slow: 0, color: "#ff9a62" },
+  frost: { name: "Frost", icon: "❄️", cost: 55, range: 2.0, fireRate: 1.4, damage: 4, splash: 0.9, slow: 0.5, color: "#4fd1ff" },
+  sniper: { name: "Sniper", icon: "🎯", cost: 90, range: 4.5, fireRate: 0.55, damage: 45, splash: 0, slow: 0, color: "#c77dff" },
+};
+const UPGRADE_MULT = 1.55;
+
+const WAYPOINTS = [
+  { c: -1, r: 1 }, { c: 11, r: 1 }, { c: 11, r: 3 }, { c: 2, r: 3 },
+  { c: 2, r: 5 }, { c: 12, r: 5 }, { c: 12, r: 7 }, { c: -1, r: 7 },
+];
+function buildPath() {
+  const cells = [];
+  for (let i = 0; i < WAYPOINTS.length - 1; i++) {
+    const a = WAYPOINTS[i], b = WAYPOINTS[i + 1];
+    const dc = Math.sign(b.c - a.c), dr = Math.sign(b.r - a.r);
+    let c = a.c, r = a.r;
+    while (c !== b.c || r !== b.r) {
+      cells.push({ c, r });
+      if (c !== b.c) c += dc; else r += dr;
+    }
+  }
+  cells.push(WAYPOINTS[WAYPOINTS.length - 1]);
+  return cells;
+}
+const PATH = buildPath();
+const pathSet = new Set(PATH.map((p) => `${p.c},${p.r}`));
+
+const ENEMY_TYPES = {
+  grunt: { name: "Grunt", hp: 30, speed: 1.4, reward: 4, color: "#ff9a62" },
+  runner: { name: "Runner", hp: 16, speed: 2.6, reward: 5, color: "#ffe17d" },
+  tank: { name: "Tank", hp: 90, speed: 0.9, reward: 10, color: "#ff5c6c" },
+  boss: { name: "Boss", hp: 320, speed: 0.8, reward: 60, color: "#c77dff" },
+};
+
+let cellPx, towers, enemies, projectiles, particles, gold, lives, wave, waveActive, spawnQueue, spawnTimer, running, won, armedType, selectedTower, best, enemyIdSeq;
+const TOTAL_WAVES = 15;
+
+function cellCenter(c, r) { return { x: (c + 0.5) * cellPx, y: (r + 0.5) * cellPx }; }
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cellPx = rect.width / COLS;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = rect.height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function buildToolbar() {
+  toolbar.innerHTML = "";
+  for (const key in TOWER_TYPES) {
+    const t = TOWER_TYPES[key];
+    const btn = document.createElement("button");
+    btn.className = "tower-btn";
+    btn.dataset.type = key;
+    btn.innerHTML = `<div class="icon">${t.icon}</div><div>${t.name}</div><div class="cost">${t.cost}g</div>`;
+    btn.addEventListener("click", () => {
+      armedType = armedType === key ? null : key;
+      selectedTower = null;
+      selPanel.style.display = "none";
+      updateToolbarActive();
+    });
+    toolbar.appendChild(btn);
+  }
+}
+function updateToolbarActive() {
+  toolbar.querySelectorAll(".tower-btn").forEach((b) => b.classList.toggle("active", b.dataset.type === armedType));
+}
+
+function isBuildable(c, r) {
+  if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+  if (pathSet.has(`${c},${r}`)) return false;
+  return !towers.some((t) => t.c === c && t.r === r);
+}
+
+function placeTower(c, r, type) {
+  const def = TOWER_TYPES[type];
+  if (gold < def.cost || !isBuildable(c, r)) return;
+  gold -= def.cost;
+  towers.push({ c, r, type, level: 1, cooldown: 0, spent: def.cost });
+  Sound.click();
+  armedType = null;
+  updateToolbarActive();
+  updateHud();
+}
+
+function towerStats(t) {
+  const def = TOWER_TYPES[t.type];
+  const mult = Math.pow(UPGRADE_MULT, t.level - 1);
+  return { range: def.range, fireRate: def.fireRate * (1 + (t.level - 1) * 0.15), damage: Math.round(def.damage * mult), splash: def.splash, slow: def.slow, color: def.color, icon: def.icon, name: def.name };
+}
+
+function upgradeCost(t) { return Math.round(TOWER_TYPES[t.type].cost * 0.8 * t.level); }
+
+function selectTower(t) {
+  armedType = null;
+  updateToolbarActive();
+  selectedTower = t;
+  renderSelPanel();
+}
+
+function renderSelPanel() {
+  if (!selectedTower) { selPanel.style.display = "none"; return; }
+  const t = selectedTower;
+  const stats = towerStats(t);
+  const upCost = upgradeCost(t);
+  const sellValue = Math.round(t.spent * 0.6);
+  selPanel.style.display = "flex";
+  selPanel.innerHTML = `
+    <div class="row"><strong>${stats.icon} ${stats.name} (Lv ${t.level})</strong><span>DMG ${stats.damage} · RNG ${stats.range.toFixed(1)}</span></div>
+    <div class="row">
+      <button id="upBtn" style="background:var(--accent);color:#0b0f2a;">${t.level >= 4 ? "Max Level" : "Upgrade (" + upCost + "g)"}</button>
+      <button id="sellBtn" style="background:rgba(255,92,108,0.2);color:#ff9aa4;">Sell (+${sellValue}g)</button>
+    </div>`;
+  const upBtn = document.getElementById("upBtn");
+  if (t.level < 4) {
+    upBtn.addEventListener("click", () => {
+      if (gold < upCost) return;
+      gold -= upCost;
+      t.spent += upCost;
+      t.level++;
+      Sound.good();
+      updateHud();
+      renderSelPanel();
+    });
+  } else {
+    upBtn.disabled = true;
+  }
+  document.getElementById("sellBtn").addEventListener("click", () => {
+    towers = towers.filter((tw) => tw !== t);
+    gold += sellValue;
+    selectedTower = null;
+    Sound.click();
+    updateHud();
+    renderSelPanel();
+  });
+}
+
+function updateHud() {
+  goldEl.textContent = gold;
+  livesEl.textContent = lives;
+  waveEl.textContent = wave;
+  bestEl.textContent = best;
+}
+
+function buildWave(n) {
+  const list = [];
+  const count = 6 + n * 2;
+  for (let i = 0; i < count; i++) {
+    let type = "grunt";
+    const r = Math.random();
+    if (r < 0.25) type = "runner";
+    else if (r < 0.45 && n > 2) type = "tank";
+    list.push(type);
+  }
+  if (n % 5 === 0) list.push("boss");
+  return list;
+}
+
+function startWave() {
+  if (waveActive || !running) return;
+  wave++;
+  const queue = buildWave(wave);
+  const scale = 1 + (wave - 1) * 0.16;
+  spawnQueue = queue.map((type) => ({ type, scale }));
+  spawnTimer = 0;
+  waveActive = true;
+  waveBtn.disabled = true;
+  waveBtn.textContent = "Wave " + wave + " in progress...";
+  updateHud();
+}
+
+function spawnEnemy(type, scale) {
+  const def = ENEMY_TYPES[type];
+  const hp = Math.round(def.hp * scale);
+  enemies.push({ id: enemyIdSeq++, type, hp, maxHp: hp, speed: def.speed, reward: def.reward, color: def.color, pathPos: 0, slowUntil: 0, alive: true });
+}
+
+function findTarget(t, stats) {
+  const center = cellCenter(t.c, t.r);
+  let best = null, bestProgress = -1;
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const pos = enemyPixelPos(e);
+    const dist = Math.hypot(pos.x - center.x, pos.y - center.y) / cellPx;
+    if (dist <= stats.range && e.pathPos > bestProgress) { best = e; bestProgress = e.pathPos; }
+  }
+  return best;
+}
+
+function enemyPixelPos(e) {
+  const idx = Math.min(Math.floor(e.pathPos), PATH.length - 2);
+  const frac = Math.min(1, e.pathPos - idx);
+  const a = cellCenter(PATH[idx].c, PATH[idx].r);
+  const b = cellCenter(PATH[idx + 1].c, PATH[idx + 1].r);
+  return { x: a.x + (b.x - a.x) * frac, y: a.y + (b.y - a.y) * frac };
+}
+
+function dealDamage(e, dmg) {
+  e.hp -= dmg;
+  if (e.hp <= 0 && e.alive) {
+    e.alive = false;
+    gold += e.reward;
+    Sound.coin();
+  }
+}
+
+function update(dt) {
+  if (!running) return;
+
+  if (spawnQueue && spawnQueue.length) {
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      const next = spawnQueue.shift();
+      spawnEnemy(next.type, next.scale);
+      spawnTimer = 0.55;
+    }
+  }
+
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const slowed = e.slowUntil > performance.now();
+    const speed = e.speed * (slowed ? 0.5 : 1);
+    e.pathPos += speed * dt;
+    if (e.pathPos >= PATH.length - 1) {
+      e.alive = false;
+      e.reachedEnd = true;
+      lives--;
+      Sound.bad();
+      if (lives <= 0) { lives = 0; endGame(false); }
+    }
+  }
+  enemies = enemies.filter((e) => e.alive || false);
+
+  for (const t of towers) {
+    const stats = towerStats(t);
+    t.cooldown -= dt;
+    if (t.cooldown > 0) continue;
+    const target = findTarget(t, stats);
+    if (!target) continue;
+    t.cooldown = 1 / stats.fireRate;
+    const center = cellCenter(t.c, t.r);
+    const tp = enemyPixelPos(target);
+    projectiles.push({ x: center.x, y: center.y, tx: tp.x, ty: tp.y, target, color: stats.color, life: 0.15 });
+
+    if (stats.splash > 0) {
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const ep = enemyPixelPos(e);
+        if (Math.hypot(ep.x - tp.x, ep.y - tp.y) / cellPx <= stats.splash) {
+          dealDamage(e, stats.damage);
+          if (stats.slow > 0) e.slowUntil = performance.now() + 1200;
+        }
+      }
+    } else {
+      dealDamage(target, stats.damage);
+      if (stats.slow > 0) target.slowUntil = performance.now() + 1200;
+    }
+  }
+
+  projectiles.forEach((p) => (p.life -= dt));
+  projectiles = projectiles.filter((p) => p.life > 0);
+
+  if (waveActive && (!spawnQueue || spawnQueue.length === 0) && enemies.every((e) => !e.alive)) {
+    waveActive = false;
+    Sound.good();
+    if (wave >= TOTAL_WAVES) { endGame(true); }
+    else { waveBtn.disabled = false; waveBtn.textContent = "Start Wave " + (wave + 1); }
+  }
+  updateHud();
+}
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "#0b0f2a";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+  if (!cellPx) return;
+
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    ctx.fillStyle = pathSet.has(`${c},${r}`) ? "#3d2f6b" : (c + r) % 2 === 0 ? "#141a3a" : "#111632";
+    ctx.fillRect(c * cellPx, r * cellPx, cellPx - 1, cellPx - 1);
+  }
+
+  if (armedType) {
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      if (isBuildable(c, r)) {
+        ctx.fillStyle = "rgba(124,247,201,0.06)";
+        ctx.fillRect(c * cellPx, r * cellPx, cellPx - 1, cellPx - 1);
+      }
+    }
+  }
+
+  for (const t of towers) {
+    const stats = towerStats(t);
+    const center = cellCenter(t.c, t.r);
+    if (t === selectedTower) {
+      ctx.strokeStyle = "rgba(255,255,255,0.25)";
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, stats.range * cellPx, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = stats.color;
+    ctx.shadowColor = stats.color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.roundRect(t.c * cellPx + 3, t.r * cellPx + 3, cellPx - 6, cellPx - 6, 6);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.font = `${cellPx * 0.5}px sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(stats.icon, center.x, center.y);
+    if (t.level > 1) {
+      ctx.fillStyle = "#0b0f2a";
+      ctx.font = `bold ${cellPx * 0.28}px sans-serif`;
+      ctx.fillText(t.level, t.c * cellPx + cellPx - 8, t.r * cellPx + 8);
+    }
+  }
+
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const pos = enemyPixelPos(e);
+    ctx.fillStyle = e.color;
+    ctx.shadowColor = e.color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, cellPx * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    const hpFrac = e.hp / e.maxHp;
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(pos.x - cellPx * 0.24, pos.y - cellPx * 0.4, cellPx * 0.48, 3);
+    ctx.fillStyle = "#7cf7c9";
+    ctx.fillRect(pos.x - cellPx * 0.24, pos.y - cellPx * 0.4, cellPx * 0.48 * hpFrac, 3);
+  }
+
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 2;
+  for (const p of projectiles) {
+    ctx.strokeStyle = p.color;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.tx, p.ty);
+    ctx.stroke();
+  }
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.05);
+  lastTime = t;
+  update(dt);
+  draw();
+  if (running) requestAnimationFrame(loop);
+}
+
+function endGame(victory) {
+  running = false;
+  won = victory;
+  Sound[victory ? "win" : "bad"]();
+  if (wave > best) { best = wave; localStorage.setItem("bastion-best", String(best)); }
+  updateHud();
+  overlay.innerHTML = `<h2>${victory ? "Victory!" : "Defeated"}</h2><p>${victory ? "All 15 waves repelled." : "Reached wave " + wave + "."}</p><button class="btn" id="startBtn2">Play Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+}
+
+function handleCanvasClick(clientX, clientY) {
+  if (!running) return;
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((clientX - rect.left) / cellPx);
+  const r = Math.floor((clientY - rect.top) / cellPx);
+  if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
+  const tower = towers.find((t) => t.c === c && t.r === r);
+  if (armedType) {
+    placeTower(c, r, armedType);
+  } else if (tower) {
+    selectTower(tower);
+  } else {
+    selectedTower = null;
+    renderSelPanel();
+  }
+  draw();
+}
+canvas.addEventListener("pointerdown", (e) => handleCanvasClick(e.clientX, e.clientY));
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  towers = []; enemies = []; projectiles = []; particles = [];
+  gold = 150; lives = 20; wave = 0; waveActive = false; spawnQueue = []; enemyIdSeq = 1;
+  running = true; won = false; armedType = null; selectedTower = null;
+  waveBtn.disabled = false;
+  waveBtn.textContent = "Start Wave 1";
+  updateHud();
+  renderSelPanel();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+waveBtn.addEventListener("click", startWave);
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) { running = false; overlay.innerHTML = `<h2>Paused</h2><p>Wave ${wave}, ${lives} lives, ${gold} gold.</p><button class="btn" id="resumeBtn">Resume</button>`; overlay.style.display = "flex"; document.getElementById("resumeBtn").addEventListener("click", () => { overlay.style.display = "none"; running = true; lastTime = performance.now(); requestAnimationFrame(loop); }); }
+});
+
+buildToolbar();
+best = Number(localStorage.getItem("bastion-best") || 0);
+towers = []; enemies = []; projectiles = [];
+resize();
+document.getElementById("waveTotal").textContent = TOTAL_WAVES;
+updateHud();
+</script>
+</body>
+</html>

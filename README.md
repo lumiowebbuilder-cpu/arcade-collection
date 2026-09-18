@@ -1,8 +1,10 @@
 # Arcade Collection
 
-Ten small, dependency-free browser games. Each one is a single self-contained
+Fifteen small, dependency-free browser games. Each one is a single self-contained
 HTML file (inline CSS/JS, no build step, no framework) sharing a small common
 stylesheet and a synthesized Web Audio sound effects helper.
+
+## Quick arcade games
 
 - **Snake** — grow long, don't bite yourself
 - **2048** — slide & merge to the target tile
@@ -14,6 +16,22 @@ stylesheet and a synthesized Web Audio sound effects helper.
 - **Platformer** — side-scrolling run/jump with gravity, pits, spikes, coins, a flag to reach
 - **Pong** — versus a CPU paddle, first to 7
 - **Word Guess** — Wordle-style 5-letter word game, 6 guesses
+
+## Deeper-system games
+
+- **Chess** — full legal move generation (castling, en passant, promotion,
+  check/checkmate/stalemate) plus a minimax + alpha-beta AI opponent with
+  selectable difficulty
+- **Descent** (roguelike) — procedurally generated dungeons, turn-based combat,
+  fog of war, BFS enemy pathfinding, leveling, items, permadeath
+- **Bastion** (tower defense) — 4 tower types with upgrades, a fixed enemy
+  path, wave-based economy, 15 waves plus a boss wave
+- **Ember Deck** (card battler) — a Slay-the-Spire-style deckbuilding roguelike
+  run: draw/discard/energy mechanics, status effects, 6 fights including a boss,
+  card rewards that grow your deck
+- **Vanguard** (tactics) — grid-based squad tactics with telegraphed enemy
+  intents (see attacks before they land), BFS movement, a building-protection
+  objective, 4 levels
 
 Each game tracks its own high score / best stat in `localStorage`.
 
@@ -27,4 +45,4 @@ node server.js
 ```
 
 Then open [http://localhost:3500](http://localhost:3500) for the hub page
-linking to all ten games.
+linking to all fifteen games.

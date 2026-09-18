@@ -27,13 +27,15 @@
   .tile .emoji { font-size: 30px; }
   .tile .name { font-weight: 700; font-size: 14px; }
   .tile .desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+  .section-label { width: 100%; font-size: 12px; letter-spacing: 0.12em; color: var(--text-dim); text-transform: uppercase; margin: 14px 0 -2px; text-align: center; }
+  .tile .badge { font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--purple); background: rgba(199,125,255,0.15); border-radius: 999px; padding: 2px 7px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="hero">
     <h1>ARCADE COLLECTION</h1>
-    <p>Ten small games. Pick one.</p>
+    <p>Fifteen small games. Pick one.</p>
   </div>
   <div class="tiles">
     <a class="home-tile" href="games/snake/index.html"><div class="tile"><div class="emoji">🐍</div><div class="name">Snake</div><div class="desc">Grow long, don't bite yourself</div></div></a>
@@ -46,6 +48,14 @@
     <a class="home-tile" href="games/platformer/index.html"><div class="tile"><div class="emoji">🏃</div><div class="name">Platformer</div><div class="desc">Run, jump, reach the flag</div></div></a>
     <a class="home-tile" href="games/pong/index.html"><div class="tile"><div class="emoji">🏓</div><div class="name">Pong</div><div class="desc">Beat the CPU paddle</div></div></a>
     <a class="home-tile" href="games/word-guess/index.html"><div class="tile"><div class="emoji">🔤</div><div class="name">Word Guess</div><div class="desc">Six tries to nail the word</div></div></a>
+  </div>
+  <div class="section-label">Deeper systems &middot; longer runs</div>
+  <div class="tiles">
+    <a class="home-tile" href="games/chess/index.html"><div class="tile"><div class="emoji">♟️</div><div class="name">Chess</div><div class="badge">AI</div><div class="desc">Full rules, play vs. a minimax AI</div></div></a>
+    <a class="home-tile" href="games/roguelike/index.html"><div class="tile"><div class="emoji">🗡️</div><div class="name">Descent</div><div class="badge">Roguelike</div><div class="desc">Procedural dungeon, permadeath</div></div></a>
+    <a class="home-tile" href="games/tower-defense/index.html"><div class="tile"><div class="emoji">🏰</div><div class="name">Bastion</div><div class="badge">Strategy</div><div class="desc">15 waves, towers &amp; economy</div></div></a>
+    <a class="home-tile" href="games/card-battler/index.html"><div class="tile"><div class="emoji">🃏</div><div class="name">Ember Deck</div><div class="badge">Deckbuilder</div><div class="desc">6-fight roguelike card run</div></div></a>
+    <a class="home-tile" href="games/tactics/index.html"><div class="tile"><div class="emoji">⚔️</div><div class="name">Vanguard</div><div class="badge">Tactics</div><div class="desc">Telegraphed grid combat, 4 levels</div></div></a>
   </div>
 </div>
 </body>

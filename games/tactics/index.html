@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Vanguard — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 1/1; width: 100%; max-width: 520px; touch-action: none; }
+  #unitInfo { width: 100%; max-width: 520px; min-height: 54px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 8px 12px; font-size: 12px; color: var(--text-dim); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .unit-roster { display: flex; gap: 8px; }
+  .roster-chip { padding: 4px 9px; border-radius: 8px; font-size: 11px; border: 1px solid var(--panel-border); }
+  .roster-chip.dead { opacity: 0.3; text-decoration: line-through; }
+  .roster-chip.done { opacity: 0.55; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">VANGUARD</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>LEVEL <strong id="levelNum">1</strong>/4</div>
+    <div>ENEMIES <strong id="enemyCount">0</strong></div>
+    <div>BUILDINGS <strong id="buildingCount">0</strong></div>
+    <div>BEST <strong id="best">0</strong>/4</div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>VANGUARD</h2>
+      <p>Move &amp; attack your 3 units each turn. Enemy attacks are telegraphed &mdash; reposition or kill them first. Protect the buildings. Clear all 4 levels.</p>
+      <button class="btn" id="startBtn">Deploy</button>
+    </div>
+  </div>
+  <div id="unitInfo"><span id="infoText">Select a unit.</span><div class="unit-roster" id="roster"></div></div>
+  <button class="btn" id="endTurnBtn">End Turn</button>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const W = 8, H = 8;
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const infoText = document.getElementById("infoText");
+const rosterEl = document.getElementById("roster");
+const levelNumEl = document.getElementById("levelNum");
+const enemyCountEl = document.getElementById("enemyCount");
+const buildingCountEl = document.getElementById("buildingCount");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const PLAYER_DEFS = {
+  soldier: { name: "Soldier", move: 3, range: 1, dmg: 4, hp: 6, color: "#7cf7c9", glyph: "S" },
+  ranger: { name: "Ranger", move: 2, range: 3, dmg: 3, hp: 4, color: "#4fd1ff", glyph: "R" },
+  tank: { name: "Tank", move: 2, range: 1, dmg: 5, hp: 10, color: "#ffe17d", glyph: "T" },
+};
+const ENEMY_DEFS = {
+  grunt: { name: "Grunt", move: 2, range: 1, dmg: 3, hp: 5, color: "#ff5c6c", glyph: "g" },
+  archer: { name: "Archer", move: 1, range: 3, dmg: 2, hp: 4, color: "#ff9a62", glyph: "a" },
+  brute: { name: "Brute", move: 1, range: 1, dmg: 5, hp: 8, color: "#c77dff", glyph: "b" },
+};
+
+const LEVELS = [
+  { enemies: [["grunt",6,1],["grunt",6,5],["archer",7,3]], buildings: [[3,6],[5,7]], obstacles: [[3,3],[4,4]] },
+  { enemies: [["grunt",6,0],["grunt",6,3],["archer",7,6],["brute",5,5]], buildings: [[2,6],[4,7],[6,6]], obstacles: [[2,2],[5,3],[3,5]] },
+  { enemies: [["grunt",6,1],["brute",7,4],["archer",6,6],["grunt",5,0],["archer",7,2]], buildings: [[1,6],[3,7],[5,6]], obstacles: [[4,2],[2,4],[5,5],[3,1]] },
+  { enemies: [["brute",6,1],["brute",6,5],["archer",7,3],["grunt",5,0],["grunt",5,6],["archer",7,7]], buildings: [[2,7],[4,6],[6,7]], obstacles: [[3,3],[4,4],[2,2],[5,5]] },
+];
+
+let units, enemies, buildings, obstacles, level, best, running, selected, moveRange, attackTargets, uidSeq;
+
+function key(x, y) { return x + "," + y; }
+function inBounds(x, y) { return x >= 0 && x < W && y >= 0 && y < H; }
+function manhattan(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+
+function isBlocked(x, y, ignoreId) {
+  if (!inBounds(x, y)) return true;
+  if (obstacles.some((o) => o.x === x && o.y === y)) return true;
+  if (units.some((u) => u.alive && u.id !== ignoreId && u.x === x && u.y === y)) return true;
+  if (enemies.some((e) => e.alive && e.id !== ignoreId && e.x === x && e.y === y)) return true;
+  return false;
+}
+
+function reachable(unit) {
+  const visited = new Map([[key(unit.x, unit.y), 0]]);
+  const queue = [[unit.x, unit.y, 0]];
+  let head = 0;
+  while (head < queue.length) {
+    const [x, y, d] = queue[head++];
+    if (d >= unit.move) continue;
+    for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const nx = x + dx, ny = y + dy;
+      if (isBlocked(nx, ny, unit.id)) continue;
+      const k = key(nx, ny);
+      if (visited.has(k)) continue;
+      visited.set(k, d + 1);
+      queue.push([nx, ny, d + 1]);
+    }
+  }
+  return visited;
+}
+
+function loadLevel(idx) {
+  const def = LEVELS[idx];
+  obstacles = def.obstacles.map(([x, y]) => ({ x, y }));
+  buildings = def.buildings.map(([x, y]) => ({ x, y, alive: true }));
+  enemies = def.enemies.map(([type, x, y]) => ({ id: "e" + uidSeq++, type, x, y, hp: ENEMY_DEFS[type].hp, maxHp: ENEMY_DEFS[type].hp, alive: true }));
+  if (!units) {
+    units = [
+      { id: "u" + uidSeq++, type: "soldier", x: 0, y: 2, hp: 6, maxHp: 6, alive: true, moved: false, acted: false },
+      { id: "u" + uidSeq++, type: "ranger", x: 0, y: 4, hp: 4, maxHp: 4, alive: true, moved: false, acted: false },
+      { id: "u" + uidSeq++, type: "tank", x: 0, y: 6, hp: 10, maxHp: 10, alive: true, moved: false, acted: false },
+    ];
+  } else {
+    const spots = [[0,2],[0,4],[0,6]];
+    units.forEach((u, i) => {
+      if (!u.alive) return;
+      u.hp = u.maxHp; u.moved = false; u.acted = false;
+      u.x = spots[i][0]; u.y = spots[i][1];
+    });
+  }
+  selected = null; moveRange = null; attackTargets = null;
+  render();
+}
+
+function enemyDecision(e) {
+  const def = ENEMY_DEFS[e.type];
+  const liveTargets = [...units.filter((u) => u.alive), ...buildings.filter((b) => b.alive)];
+  if (liveTargets.length === 0) return null;
+
+  const inRangeNow = liveTargets.filter((t) => manhattan(e, t) <= def.range);
+  const preferred = inRangeNow.find((t) => t.hp !== undefined) || inRangeNow[0];
+  if (preferred) return { moveTo: null, target: preferred, dmg: def.dmg };
+
+  const options = reachable({ id: e.id, x: e.x, y: e.y, move: def.move });
+  let bestTile = null, bestDist = Infinity, bestTarget = null, bestSteps = Infinity;
+  for (const [k, steps] of options) {
+    const [tx, ty] = k.split(",").map(Number);
+    for (const t of liveTargets) {
+      const d = manhattan({ x: tx, y: ty }, t);
+      if (d < bestDist || (d === bestDist && steps < bestSteps)) {
+        bestDist = d; bestTile = { x: tx, y: ty }; bestSteps = steps; bestTarget = t;
+      }
+    }
+  }
+  const canAttackAfterMove = bestTile && bestDist <= def.range;
+  return { moveTo: bestTile, target: canAttackAfterMove ? bestTarget : null, dmg: def.dmg, previewTarget: bestTarget };
+}
+
+function selectUnit(u) {
+  if (!u.alive || u.acted) return;
+  selected = u;
+  moveRange = u.moved ? new Map([[key(u.x, u.y), 0]]) : reachable({ id: u.id, x: u.x, y: u.y, move: PLAYER_DEFS[u.type].move });
+  computeAttackTargets();
+  render();
+}
+
+function computeAttackTargets() {
+  const def = PLAYER_DEFS[selected.type];
+  attackTargets = enemies.filter((e) => e.alive && manhattan(selected, e) <= def.range);
+}
+
+function moveSelectedTo(x, y) {
+  if (!selected || selected.moved || !moveRange.has(key(x, y))) return;
+  selected.x = x; selected.y = y; selected.moved = true;
+  Sound.move();
+  computeAttackTargets();
+  moveRange = new Map([[key(x, y), 0]]);
+  render();
+}
+
+function attackWith(target) {
+  if (!selected || selected.acted) return;
+  const def = PLAYER_DEFS[selected.type];
+  if (manhattan(selected, target) > def.range) return;
+  target.hp -= def.dmg;
+  Sound.click();
+  if (target.hp <= 0) { target.alive = false; Sound.coin(); }
+  selected.acted = true;
+  selected = null; moveRange = null; attackTargets = null;
+  checkLevelClear();
+  render();
+}
+
+function checkLevelClear() {
+  if (enemies.every((e) => !e.alive)) {
+    Sound.win();
+    running = false;
+    level++;
+    if (level >= LEVELS.length) { victory(); return; }
+    overlay.innerHTML = `<h2>Level Cleared</h2><p>Enemies wiped out. ${buildings.filter(b=>b.alive).length}/${buildings.length} buildings still standing.</p><button class="btn" id="nextBtn">Next Level</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      overlay.style.display = "none";
+      running = true;
+      loadLevel(level);
+    });
+  }
+}
+
+function endPlayerTurn() {
+  if (!running) return;
+  selected = null; moveRange = null; attackTargets = null;
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const decision = enemyDecision(e);
+    if (!decision) continue;
+    if (decision.moveTo) { e.x = decision.moveTo.x; e.y = decision.moveTo.y; }
+    if (decision.target) {
+      decision.target.hp -= decision.dmg;
+      Sound.bad();
+      if (decision.target.hp <= 0) decision.target.alive = false;
+    }
+  }
+  units.forEach((u) => { if (u.alive) { u.moved = false; u.acted = false; } });
+  render();
+
+  if (units.every((u) => !u.alive)) { defeat("All units lost."); return; }
+  if (buildings.every((b) => !b.alive)) { defeat("All buildings destroyed."); return; }
+}
+
+function defeat(reason) {
+  running = false;
+  Sound.bad();
+  if (level > best) { best = level; localStorage.setItem("vanguard-best", String(best)); }
+  overlay.innerHTML = `<h2>Mission Failed</h2><p>${reason} Reached level ${level + 1}.</p><button class="btn" id="startBtn2">Retry Campaign</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  bestEl.textContent = best;
+}
+
+function victory() {
+  Sound.win();
+  best = LEVELS.length;
+  localStorage.setItem("vanguard-best", String(best));
+  overlay.innerHTML = `<h2>Campaign Complete!</h2><p>All 4 levels cleared.</p><button class="btn" id="startBtn2">Play Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  bestEl.textContent = best;
+}
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + "px"; canvas.style.height = rect.height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  render();
+}
+window.addEventListener("resize", resize);
+
+function cellPxSize() { return canvas.getBoundingClientRect().width / W; }
+
+function render() {
+  if (!units) return;
+  const rect = canvas.getBoundingClientRect();
+  const cell = rect.width / W;
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "#0b0f2a";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    ctx.fillStyle = (x + y) % 2 === 0 ? "#141a3a" : "#111632";
+    ctx.fillRect(x * cell, y * cell, cell - 1, cell - 1);
+  }
+  if (moveRange) {
+    for (const k of moveRange.keys()) {
+      const [x, y] = k.split(",").map(Number);
+      ctx.fillStyle = "rgba(124,247,201,0.15)";
+      ctx.fillRect(x * cell, y * cell, cell - 1, cell - 1);
+    }
+  }
+  for (const o of obstacles) {
+    ctx.fillStyle = "#2a2f52";
+    ctx.fillRect(o.x * cell + 2, o.y * cell + 2, cell - 4, cell - 4);
+  }
+  for (const b of buildings) {
+    if (!b.alive) continue;
+    ctx.fillStyle = "#ffe17d";
+    ctx.font = `${cell * 0.55}px sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("🏠", b.x * cell + cell / 2, b.y * cell + cell / 2);
+  }
+
+  if (running) {
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const d = enemyDecision(e);
+      if (!d) continue;
+      const tgt = d.target || d.previewTarget;
+      if (tgt) {
+        ctx.strokeStyle = "rgba(255,92,108,0.55)";
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(e.x * cell + cell / 2, e.y * cell + cell / 2);
+        ctx.lineTo(tgt.x * cell + cell / 2, tgt.y * cell + cell / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  if (attackTargets) {
+    for (const e of attackTargets) {
+      ctx.strokeStyle = "#ff5c6c";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(e.x * cell + cell / 2, e.y * cell + cell / 2, cell * 0.42, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  const drawUnit = (u, def, isPlayer) => {
+    if (!u.alive) return;
+    ctx.fillStyle = def.color;
+    ctx.shadowColor = def.color;
+    ctx.shadowBlur = isPlayer && u.acted ? 0 : 8;
+    ctx.globalAlpha = isPlayer && u.acted ? 0.45 : 1;
+    ctx.beginPath();
+    ctx.roundRect(u.x * cell + 4, u.y * cell + 4, cell - 8, cell - 8, 6);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#0b0f2a";
+    ctx.font = `bold ${cell * 0.45}px sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(def.glyph, u.x * cell + cell / 2, u.y * cell + cell / 2);
+    ctx.globalAlpha = 1;
+    const hpFrac = u.hp / u.maxHp;
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(u.x * cell + 4, u.y * cell + cell - 7, cell - 8, 3);
+    ctx.fillStyle = isPlayer ? "#7cf7c9" : "#ff5c6c";
+    ctx.fillRect(u.x * cell + 4, u.y * cell + cell - 7, (cell - 8) * Math.max(0, hpFrac), 3);
+    if (selected === u) {
+      ctx.strokeStyle = "#ffe17d";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(u.x * cell + 2, u.y * cell + 2, cell - 4, cell - 4);
+    }
+  };
+  for (const u of units) drawUnit(u, PLAYER_DEFS[u.type], true);
+  for (const e of enemies) drawUnit(e, ENEMY_DEFS[e.type], false);
+
+  levelNumEl.textContent = level + 1;
+  enemyCountEl.textContent = enemies.filter((e) => e.alive).length;
+  buildingCountEl.textContent = buildings.filter((b) => b.alive).length;
+  bestEl.textContent = best;
+  renderInfo();
+}
+
+function renderInfo() {
+  if (selected) {
+    const def = PLAYER_DEFS[selected.type];
+    infoText.textContent = `${def.name} — HP ${selected.hp}/${selected.maxHp} · MOVE ${def.move} · RANGE ${def.range} · DMG ${def.dmg}${selected.moved ? " (moved)" : ""}`;
+  } else {
+    infoText.textContent = "Select a unit to move or attack.";
+  }
+  rosterEl.innerHTML = "";
+  units.forEach((u) => {
+    const chip = document.createElement("div");
+    chip.className = "roster-chip" + (!u.alive ? " dead" : u.acted ? " done" : "");
+    chip.textContent = PLAYER_DEFS[u.type].name;
+    rosterEl.appendChild(chip);
+  });
+}
+
+function handleClick(clientX, clientY) {
+  if (!running) return;
+  const rect = canvas.getBoundingClientRect();
+  const cell = rect.width / W;
+  const x = Math.floor((clientX - rect.left) / cell);
+  const y = Math.floor((clientY - rect.top) / cell);
+  if (!inBounds(x, y)) return;
+
+  const clickedUnit = units.find((u) => u.alive && u.x === x && u.y === y);
+  const clickedEnemy = enemies.find((e) => e.alive && e.x === x && e.y === y);
+
+  if (selected && clickedEnemy && attackTargets && attackTargets.includes(clickedEnemy)) {
+    attackWith(clickedEnemy);
+    return;
+  }
+  if (clickedUnit) { selectUnit(clickedUnit); return; }
+  if (selected && moveRange && moveRange.has(key(x, y))) { moveSelectedTo(x, y); return; }
+}
+canvas.addEventListener("pointerdown", (e) => handleClick(e.clientX, e.clientY));
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  units = null;
+  level = 0; running = true; uidSeq = 1;
+  loadLevel(0);
+}
+
+document.getElementById("endTurnBtn").addEventListener("click", endPlayerTurn);
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("vanguard-best") || 0);
+level = 0;
+resize();
+</script>
+</body>
+</html>

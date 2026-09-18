@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Ember Deck — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #arena { width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 10px; }
+  .combatant { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .combatant .row1 { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+  .barbg { width: 100%; height: 10px; border-radius: 5px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .barfill { height: 100%; }
+  .hpfill { background: linear-gradient(90deg,#ff5c6c,#ff9a62); }
+  .status-chips { display: flex; gap: 6px; font-size: 11px; }
+  .chip { padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,0.08); }
+  .intent { font-size: 12px; color: var(--accent2); }
+  #hand { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; min-height: 130px; align-items: flex-end; }
+  .card { width: 88px; height: 118px; border-radius: 10px; background: linear-gradient(160deg, rgba(255,255,255,0.1), rgba(255,255,255,0.03)); border: 1px solid var(--panel-border); display: flex; flex-direction: column; padding: 8px; cursor: pointer; transition: transform 0.12s; font-size: 11px; }
+  .card:hover { transform: translateY(-6px); border-color: var(--accent); }
+  .card.unaffordable { opacity: 0.4; cursor: not-allowed; }
+  .card .cname { font-weight: 700; font-size: 12px; margin-top: 4px; }
+  .card .cdesc { flex: 1; color: var(--text-dim); font-size: 10px; margin-top: 4px; line-height: 1.35; }
+  .card .ccost { width: 20px; height: 20px; border-radius: 50%; background: var(--info); color: #0b0f2a; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; }
+  .reward-cards { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  #energyDisplay { font-weight: 800; color: var(--accent2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">EMBER DECK</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>FIGHT <strong id="fightNum">0</strong>/6</div>
+    <div>DECK <strong id="deckSize">0</strong></div>
+    <div>BEST <strong id="best">0</strong>/6</div>
+  </div>
+  <div class="stage" id="stage" style="min-height: 420px;">
+    <div id="arena">
+      <div class="combatant" id="enemyPanel"></div>
+      <div class="combatant" id="playerPanel"></div>
+      <div id="hand"></div>
+      <div class="controls" style="justify-content:center;">
+        <span>Energy: <span id="energyDisplay">0/0</span></span>
+        <button class="btn" id="endTurnBtn">End Turn</button>
+      </div>
+    </div>
+    <div class="overlay" id="overlay">
+      <h2>EMBER DECK</h2>
+      <p>A card-battler run: 5 fights and a boss. Play cards with your energy, end your turn, survive. Win cards between fights to grow your deck.</p>
+      <button class="btn" id="startBtn">Begin Run</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const CARDS = {
+  strike: { name: "Strike", cost: 1, type: "attack", dmg: 6, desc: "Deal 6 damage." },
+  defend: { name: "Defend", cost: 1, type: "skill", block: 5, desc: "Gain 5 Block." },
+  bash: { name: "Bash", cost: 2, type: "attack", dmg: 8, vulnerable: 2, desc: "Deal 8 damage. Apply 2 Vulnerable." },
+  twinStrike: { name: "Twin Strike", cost: 1, type: "attack", hits: 2, dmg: 4, desc: "Deal 4 damage twice." },
+  ironWave: { name: "Iron Wave", cost: 1, type: "attack", dmg: 5, block: 5, desc: "Deal 5 damage. Gain 5 Block." },
+  shrugItOff: { name: "Shrug It Off", cost: 1, type: "skill", block: 8, draw: 1, desc: "Gain 8 Block. Draw 1 card." },
+  pommelStrike: { name: "Pommel Strike", cost: 1, type: "attack", dmg: 9, draw: 1, desc: "Deal 9 damage. Draw 1 card." },
+  inflame: { name: "Inflame", cost: 1, type: "power", strength: 2, desc: "Gain 2 Strength (this fight)." },
+  bodySlam: { name: "Body Slam", cost: 1, type: "attackBlock", desc: "Deal damage equal to your Block." },
+  battleTrance: { name: "Battle Trance", cost: 0, type: "skill", draw: 2, desc: "Draw 2 cards." },
+};
+const STARTER_DECK = ["strike","strike","strike","strike","strike","defend","defend","defend","defend","bash"];
+const REWARD_POOL = ["twinStrike","ironWave","shrugItOff","pommelStrike","inflame","bodySlam","battleTrance","strike","bash","defend"];
+
+function enemyDef(fightIdx) {
+  const scale = 1 + fightIdx * 0.22;
+  const defs = [
+    { name: "Cave Rat", hp: 24, pattern: [{ type: "attack", dmg: 6 }, { type: "attack", dmg: 6 }, { type: "defend", block: 6 }] },
+    { name: "Bandit", hp: 32, pattern: [{ type: "attack", dmg: 9 }, { type: "attackDebuff", dmg: 5, debuff: "weak", amount: 1, duration: 2 }, { type: "attack", dmg: 9 }] },
+    { name: "Cultist", hp: 30, pattern: [{ type: "buff", stat: "strength", amount: 3 }, { type: "attack", dmg: 7 }, { type: "attack", dmg: 7 }] },
+    { name: "Ogre", hp: 46, pattern: [{ type: "attack", dmg: 14 }, { type: "defend", block: 10 }] },
+    { name: "Shade", hp: 40, pattern: [{ type: "attackDebuff", dmg: 8, debuff: "vulnerable", amount: 2, duration: 2 }, { type: "attack", dmg: 8 }, { type: "defend", block: 8 }] },
+    { name: "Warlord (Boss)", hp: 75, pattern: [{ type: "attack", dmg: 12 }, { type: "attack", dmg: 12 }, { type: "buff", stat: "strength", amount: 2 }, { type: "attackDebuff", dmg: 10, debuff: "vulnerable", amount: 2, duration: 2 }] },
+  ];
+  const d = defs[fightIdx];
+  return { name: d.name, maxHp: Math.round(d.hp * scale), pattern: d.pattern };
+}
+
+const enemyPanel = document.getElementById("enemyPanel");
+const playerPanel = document.getElementById("playerPanel");
+const handEl = document.getElementById("hand");
+const overlay = document.getElementById("overlay");
+const energyDisplay = document.getElementById("energyDisplay");
+const fightNumEl = document.getElementById("fightNum");
+const deckSizeEl = document.getElementById("deckSize");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+let run, combat, best;
+
+function startRun() {
+  Sound.init();
+  overlay.style.display = "none";
+  run = { deck: [...STARTER_DECK], hp: 70, maxHp: 70, fightIdx: 0 };
+  startFight();
+}
+
+function startFight() {
+  const def = enemyDef(run.fightIdx);
+  combat = {
+    enemy: { name: def.name, hp: def.maxHp, maxHp: def.maxHp, pattern: def.pattern, turnCount: 0, strength: 0, vulnerable: 0, weak: 0 },
+    playerBlock: 0, playerStrength: 0, playerVulnerable: 0, playerWeak: 0,
+    drawPile: shuffle(run.deck), discardPile: [], hand: [], energy: 3, maxEnergy: 3,
+    over: false,
+  };
+  drawHand(5);
+  render();
+}
+
+function drawCard(n = 1) {
+  for (let i = 0; i < n; i++) {
+    if (combat.drawPile.length === 0) {
+      if (combat.discardPile.length === 0) return;
+      combat.drawPile = shuffle(combat.discardPile);
+      combat.discardPile = [];
+    }
+    combat.hand.push(combat.drawPile.pop());
+  }
+}
+function drawHand(n) { drawCard(n); }
+
+function enemyIntent() {
+  return combat.enemy.pattern[combat.enemy.turnCount % combat.enemy.pattern.length];
+}
+
+function playCard(idx) {
+  if (combat.over) return;
+  const id = combat.hand[idx];
+  const card = CARDS[id];
+  if (combat.energy < card.cost) return;
+  combat.energy -= card.cost;
+  combat.hand.splice(idx, 1);
+  combat.discardPile.push(id);
+  Sound.click();
+
+  const dealDamage = (amount, hits = 1) => {
+    for (let i = 0; i < hits; i++) {
+      let dmg = amount + combat.playerStrength;
+      if (combat.playerWeak > 0) dmg = Math.floor(dmg * 0.75);
+      if (combat.enemy.vulnerable > 0) dmg = Math.floor(dmg * 1.5);
+      dmg = Math.max(0, dmg);
+      const blockAbsorb = Math.min(combat.enemy.block || 0, dmg);
+      combat.enemy.block = (combat.enemy.block || 0) - blockAbsorb;
+      combat.enemy.hp -= (dmg - blockAbsorb);
+    }
+  };
+
+  if (card.type === "attack") {
+    dealDamage(card.dmg, card.hits || 1);
+    if (card.vulnerable) combat.enemy.vulnerable += card.vulnerable;
+    if (card.block) combat.playerBlock += card.block;
+  } else if (card.type === "skill") {
+    if (card.block) combat.playerBlock += card.block;
+  } else if (card.type === "power") {
+    if (card.strength) combat.playerStrength += card.strength;
+  } else if (card.type === "attackBlock") {
+    dealDamage(combat.playerBlock);
+  }
+  if (card.draw) drawCard(card.draw);
+
+  Sound.good();
+  if (combat.enemy.hp <= 0) { combat.enemy.hp = 0; winFight(); return; }
+  render();
+}
+
+function endTurn() {
+  if (combat.over) return;
+  combat.discardPile.push(...combat.hand);
+  combat.hand = [];
+  Sound.move();
+  enemyTurn();
+}
+
+function enemyTurn() {
+  const intent = enemyIntent();
+  if (intent.type === "attack" || intent.type === "attackDebuff") {
+    let dmg = intent.dmg + combat.enemy.strength;
+    if (combat.enemy.weak > 0) dmg = Math.floor(dmg * 0.75);
+    if (combat.playerVulnerable > 0) dmg = Math.floor(dmg * 1.5);
+    const absorb = Math.min(combat.playerBlock, dmg);
+    combat.playerBlock -= absorb;
+    run.hp -= (dmg - absorb);
+    Sound.bad();
+    if (intent.type === "attackDebuff") {
+      if (intent.debuff === "vulnerable") combat.playerVulnerable += intent.amount;
+      else if (intent.debuff === "weak") combat.playerWeak += intent.amount;
+    }
+  } else if (intent.type === "defend") {
+    combat.enemy.block = (combat.enemy.block || 0) + intent.block;
+  } else if (intent.type === "buff") {
+    combat.enemy[intent.stat] += intent.amount;
+  }
+  combat.enemy.turnCount++;
+  if (combat.enemy.vulnerable > 0) combat.enemy.vulnerable--;
+  if (combat.enemy.weak > 0) combat.enemy.weak--;
+
+  if (run.hp <= 0) { run.hp = 0; loseRun(); return; }
+
+  if (combat.playerVulnerable > 0) combat.playerVulnerable--;
+  if (combat.playerWeak > 0) combat.playerWeak--;
+  combat.playerBlock = 0;
+  combat.energy = combat.maxEnergy;
+  drawCard(5);
+  render();
+}
+
+function winFight() {
+  combat.over = true;
+  Sound.win();
+  run.hp = Math.min(run.maxHp, run.hp + Math.round(run.maxHp * 0.2));
+  run.fightIdx++;
+  if (run.fightIdx >= 6) { winRun(); return; }
+  showReward();
+}
+
+function showReward() {
+  const choices = shuffle(REWARD_POOL).slice(0, 3);
+  enemyPanel.style.display = "none";
+  playerPanel.style.display = "none";
+  document.querySelector(".controls").style.display = "none";
+  handEl.innerHTML = "";
+  overlay.innerHTML = `
+    <h2>Victory!</h2>
+    <p>Choose a card to add to your deck (HP: ${run.hp}/${run.maxHp}).</p>
+    <div class="reward-cards" id="rewardCards"></div>
+    <button class="btn secondary" id="skipReward">Skip</button>
+  `;
+  overlay.style.display = "flex";
+  const container = document.getElementById("rewardCards");
+  choices.forEach((id) => {
+    container.appendChild(buildCardEl(id, () => {
+      run.deck.push(id);
+      Sound.coin();
+      nextFight();
+    }, true));
+  });
+  document.getElementById("skipReward").addEventListener("click", nextFight);
+}
+
+function nextFight() {
+  overlay.style.display = "none";
+  enemyPanel.style.display = "flex";
+  playerPanel.style.display = "flex";
+  document.querySelector(".controls").style.display = "flex";
+  startFight();
+}
+
+function winRun() {
+  Sound.win();
+  if (run.fightIdx > best) { best = run.fightIdx; localStorage.setItem("emberdeck-best", String(best)); }
+  overlay.innerHTML = `<h2>Run Complete!</h2><p>You defeated the Warlord with a ${run.deck.length}-card deck.</p><button class="btn" id="startBtn2">New Run</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", startRun);
+  bestEl.textContent = best;
+}
+
+function loseRun() {
+  combat.over = true;
+  Sound.bad();
+  if (run.fightIdx > best) { best = run.fightIdx; localStorage.setItem("emberdeck-best", String(best)); }
+  overlay.innerHTML = `<h2>You Fell</h2><p>Defeated on fight ${run.fightIdx + 1} of 6, with a ${run.deck.length}-card deck.</p><button class="btn" id="startBtn2">New Run</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", startRun);
+  bestEl.textContent = best;
+  render();
+}
+
+function buildCardEl(id, onClick, alwaysAffordable) {
+  const card = CARDS[id];
+  const el = document.createElement("div");
+  const affordable = alwaysAffordable || (combat && combat.energy >= card.cost);
+  el.className = "card" + (affordable ? "" : " unaffordable");
+  el.innerHTML = `<div class="ccost">${card.cost}</div><div class="cname">${card.name}</div><div class="cdesc">${card.desc}</div>`;
+  el.addEventListener("click", () => { if (affordable) onClick(); });
+  return el;
+}
+
+function render() {
+  if (!combat) return;
+  const e = combat.enemy;
+  const intent = enemyIntent();
+  let intentText = "";
+  if (intent.type === "attack") intentText = `⚔ Attack ${intent.dmg + e.strength}`;
+  else if (intent.type === "attackDebuff") intentText = `⚔ Attack ${intent.dmg + e.strength} + ${intent.debuff}`;
+  else if (intent.type === "defend") intentText = `🛡 Block ${intent.block}`;
+  else if (intent.type === "buff") intentText = `⬆ Buff ${intent.stat}`;
+
+  enemyPanel.innerHTML = `
+    <div class="row1"><strong>${e.name}</strong><span>${Math.max(0,e.hp)}/${e.maxHp} HP${e.block ? " · 🛡" + e.block : ""}</span></div>
+    <div class="barbg"><div class="barfill hpfill" style="width:${Math.max(0,e.hp/e.maxHp*100)}%"></div></div>
+    <div class="status-chips">${e.strength ? `<span class="chip">STR ${e.strength}</span>` : ""}${e.vulnerable ? `<span class="chip">VULN ${e.vulnerable}</span>` : ""}${e.weak ? `<span class="chip">WEAK ${e.weak}</span>` : ""}</div>
+    <div class="intent">${intentText}</div>
+  `;
+
+  playerPanel.innerHTML = `
+    <div class="row1"><strong>You</strong><span>${Math.max(0,run.hp)}/${run.maxHp} HP${combat.playerBlock ? " · 🛡" + combat.playerBlock : ""}</span></div>
+    <div class="barbg"><div class="barfill hpfill" style="width:${Math.max(0,run.hp/run.maxHp*100)}%"></div></div>
+    <div class="status-chips">${combat.playerStrength ? `<span class="chip">STR ${combat.playerStrength}</span>` : ""}${combat.playerVulnerable ? `<span class="chip">VULN ${combat.playerVulnerable}</span>` : ""}${combat.playerWeak ? `<span class="chip">WEAK ${combat.playerWeak}</span>` : ""}</div>
+  `;
+
+  handEl.innerHTML = "";
+  combat.hand.forEach((id, idx) => handEl.appendChild(buildCardEl(id, () => playCard(idx))));
+
+  energyDisplay.textContent = `${combat.energy}/${combat.maxEnergy}`;
+  fightNumEl.textContent = Math.min(run.fightIdx + 1, 6);
+  deckSizeEl.textContent = run.deck.length;
+  bestEl.textContent = best;
+}
+
+document.getElementById("endTurnBtn").addEventListener("click", endTurn);
+document.getElementById("startBtn").addEventListener("click", startRun);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("emberdeck-best") || 0);
+bestEl.textContent = best;
+</script>
+</body>
+</html>
