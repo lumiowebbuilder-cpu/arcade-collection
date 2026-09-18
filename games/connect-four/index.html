@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Connect Four — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #boardWrap { width: 100%; max-width: 460px; background: #1c2560; border-radius: 14px; padding: 10px; }
+  #board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .col { display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+  .slot { aspect-ratio: 1/1; border-radius: 50%; background: #0b0f2a; position: relative; }
+  .disc { position: absolute; inset: 6%; border-radius: 50%; transition: transform 0.15s; }
+  .disc.p1 { background: radial-gradient(circle at 35% 30%, #ff9a9f, #ff5c6c); }
+  .disc.p2 { background: radial-gradient(circle at 35% 30%, #ffe98f, #ffe17d); }
+  .col:hover .slot:first-child { box-shadow: inset 0 0 0 2px rgba(124,247,201,0.4); }
+  .col.disabled { cursor: default; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">CONNECT FOUR</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>STATUS <strong id="status">Your turn</strong></div>
+    <div>RECORD <strong id="record">0-0-0</strong></div>
+  </div>
+  <div class="stage" id="stage" style="position:relative;">
+    <div id="boardWrap"><div id="board"></div></div>
+    <div class="overlay" id="overlay">
+      <h2>CONNECT FOUR</h2>
+      <p>You're red, drop into a column. Get 4 in a row &mdash; horizontal, vertical, or diagonal &mdash; before the AI.</p>
+      <div class="controls">
+        <button class="btn secondary" data-diff="2">Easy</button>
+        <button class="btn" data-diff="4">Normal</button>
+        <button class="btn secondary" data-diff="6">Hard</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const ROWS = 6, COLS = 7;
+const boardEl = document.getElementById("board");
+const overlay = document.getElementById("overlay");
+const statusEl = document.getElementById("status");
+const recordEl = document.getElementById("record");
+const muteBtn = document.getElementById("muteBtn");
+
+let board, turn, running, aiDepth, wins, losses, draws, thinking;
+const HUMAN = 1, AI = 2;
+
+function makeBoard() { return Array.from({ length: ROWS }, () => Array(COLS).fill(0)); }
+
+function dropDisc(b, col, player) {
+  for (let r = ROWS - 1; r >= 0; r--) {
+    if (b[r][col] === 0) { b[r][col] = player; return r; }
+  }
+  return -1;
+}
+
+function validCols(b) {
+  const cols = [];
+  for (let c = 0; c < COLS; c++) if (b[0][c] === 0) cols.push(c);
+  return cols;
+}
+
+const DIRS = [[0,1],[1,0],[1,1],[1,-1]];
+function checkWinAt(b, row, col, player) {
+  for (const [dr, dc] of DIRS) {
+    let count = 1;
+    for (const sign of [1, -1]) {
+      let r = row + dr * sign, c = col + dc * sign;
+      while (r >= 0 && r < ROWS && c >= 0 && c < COLS && b[r][c] === player) {
+        count++; r += dr * sign; c += dc * sign;
+      }
+    }
+    if (count >= 4) return true;
+  }
+  return false;
+}
+
+function isFull(b) { return b[0].every((v) => v !== 0); }
+
+function scoreWindow(window, ai, human) {
+  const aiCount = window.filter((v) => v === ai).length;
+  const humanCount = window.filter((v) => v === human).length;
+  const emptyCount = window.filter((v) => v === 0).length;
+  if (aiCount > 0 && humanCount > 0) return 0;
+  let score = 0;
+  if (aiCount === 4) score += 100000;
+  else if (aiCount === 3 && emptyCount === 1) score += 100;
+  else if (aiCount === 2 && emptyCount === 2) score += 10;
+  if (humanCount === 3 && emptyCount === 1) score -= 120;
+  else if (humanCount === 2 && emptyCount === 2) score -= 8;
+  return score;
+}
+
+function evaluate(b, ai, human) {
+  let score = 0;
+  for (let r = 0; r < ROWS; r++) if (b[r][3] === ai) score += 6;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c <= COLS - 4; c++) score += scoreWindow([b[r][c],b[r][c+1],b[r][c+2],b[r][c+3]], ai, human);
+  for (let c = 0; c < COLS; c++) for (let r = 0; r <= ROWS - 4; r++) score += scoreWindow([b[r][c],b[r+1][c],b[r+2][c],b[r+3][c]], ai, human);
+  for (let r = 0; r <= ROWS - 4; r++) for (let c = 0; c <= COLS - 4; c++) score += scoreWindow([b[r][c],b[r+1][c+1],b[r+2][c+2],b[r+3][c+3]], ai, human);
+  for (let r = 0; r <= ROWS - 4; r++) for (let c = 3; c < COLS; c++) score += scoreWindow([b[r][c],b[r+1][c-1],b[r+2][c-2],b[r+3][c-3]], ai, human);
+  return score;
+}
+
+function minimax(b, depth, alpha, beta, maximizing, lastMove) {
+  if (lastMove) {
+    const player = maximizing ? HUMAN : AI;
+    if (checkWinAt(b, lastMove.row, lastMove.col, player)) {
+      return { score: player === AI ? 1000000 + depth : -1000000 - depth };
+    }
+  }
+  const moves = validCols(b);
+  if (moves.length === 0) return { score: 0 };
+  if (depth === 0) return { score: evaluate(b, AI, HUMAN) };
+
+  const ordered = moves.slice().sort((a, c) => Math.abs(a - 3) - Math.abs(c - 3));
+  let best = null;
+  if (maximizing) {
+    let value = -Infinity;
+    for (const col of ordered) {
+      const row = dropDisc(b, col, AI);
+      const res = minimax(b, depth - 1, alpha, beta, false, { row, col });
+      b[row][col] = 0;
+      if (res.score > value) { value = res.score; best = col; }
+      alpha = Math.max(alpha, value);
+      if (beta <= alpha) break;
+    }
+    return { score: value, col: best };
+  } else {
+    let value = Infinity;
+    for (const col of ordered) {
+      const row = dropDisc(b, col, HUMAN);
+      const res = minimax(b, depth - 1, alpha, beta, true, { row, col });
+      b[row][col] = 0;
+      if (res.score < value) { value = res.score; best = col; }
+      beta = Math.min(beta, value);
+      if (beta <= alpha) break;
+    }
+    return { score: value, col: best };
+  }
+}
+
+function buildBoard() {
+  boardEl.innerHTML = "";
+  for (let c = 0; c < COLS; c++) {
+    const colEl = document.createElement("div");
+    colEl.className = "col";
+    colEl.dataset.col = c;
+    for (let r = 0; r < ROWS; r++) {
+      const slot = document.createElement("div");
+      slot.className = "slot";
+      colEl.appendChild(slot);
+    }
+    colEl.addEventListener("click", () => onColClick(c));
+    boardEl.appendChild(colEl);
+  }
+}
+
+function render() {
+  for (let c = 0; c < COLS; c++) {
+    const colEl = boardEl.children[c];
+    for (let r = 0; r < ROWS; r++) {
+      const slot = colEl.children[r];
+      slot.innerHTML = "";
+      const v = board[r][c];
+      if (v) {
+        const disc = document.createElement("div");
+        disc.className = "disc " + (v === HUMAN ? "p1" : "p2");
+        slot.appendChild(disc);
+      }
+    }
+    colEl.classList.toggle("disabled", thinking || !running || board[0][c] !== 0);
+  }
+  statusEl.textContent = thinking ? "AI thinking..." : running ? "Your turn" : statusEl.textContent;
+  recordEl.textContent = `${wins}-${losses}-${draws}`;
+}
+
+function onColClick(c) {
+  if (!running || thinking || turn !== HUMAN) return;
+  const row = dropDisc(board, c, HUMAN);
+  if (row === -1) return;
+  Sound.click();
+  render();
+  if (checkWinAt(board, row, c, HUMAN)) { finish("human"); return; }
+  if (isFull(board)) { finish("draw"); return; }
+  turn = AI;
+  thinking = true;
+  render();
+  setTimeout(aiMove, 80);
+}
+
+function aiMove() {
+  const res = minimax(board, aiDepth, -Infinity, Infinity, true, null);
+  let col = res.col;
+  if (col === undefined || col === null) { const vc = validCols(board); col = vc[Math.floor(Math.random()*vc.length)]; }
+  const row = dropDisc(board, col, AI);
+  thinking = false;
+  Sound.move();
+  render();
+  if (checkWinAt(board, row, col, AI)) { finish("ai"); return; }
+  if (isFull(board)) { finish("draw"); return; }
+  turn = HUMAN;
+  render();
+}
+
+function finish(result) {
+  running = false;
+  if (result === "human") { wins++; Sound.win(); }
+  else if (result === "ai") { losses++; Sound.bad(); }
+  else { draws++; Sound.click(); }
+  localStorage.setItem("c4-record", JSON.stringify({ wins, losses, draws }));
+  render();
+  const msg = result === "human" ? "You Win!" : result === "ai" ? "AI Wins" : "Draw";
+  overlay.innerHTML = `<h2>${msg}</h2><div class="controls"><button class="btn secondary" data-diff="2">Easy</button><button class="btn" data-diff="4">Normal</button><button class="btn secondary" data-diff="6">Hard</button></div>`;
+  overlay.style.display = "flex";
+  overlay.querySelectorAll("[data-diff]").forEach((b) => b.addEventListener("click", () => start(Number(b.dataset.diff))));
+}
+
+function start(depth) {
+  Sound.init();
+  aiDepth = depth;
+  overlay.style.display = "none";
+  board = makeBoard();
+  turn = HUMAN;
+  running = true;
+  thinking = false;
+  render();
+}
+
+document.querySelectorAll("[data-diff]").forEach((b) => b.addEventListener("click", () => start(Number(b.dataset.diff))));
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+const saved = JSON.parse(localStorage.getItem("c4-record") || "{}");
+wins = saved.wins || 0; losses = saved.losses || 0; draws = saved.draws || 0;
+recordEl.textContent = `${wins}-${losses}-${draws}`;
+buildBoard();
+board = makeBoard();
+render();
+</script>
+</body>
+</html>

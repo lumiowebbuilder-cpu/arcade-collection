@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Sudoku — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #board {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    grid-template-rows: repeat(9, 1fr);
+    width: 100%;
+    max-width: 440px;
+    aspect-ratio: 1/1;
+    background: #05061a;
+    border: 2px solid var(--panel-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .cell {
+    display: flex; align-items: center; justify-content: center;
+    font-size: clamp(14px, 4.2vw, 20px);
+    font-weight: 600;
+    cursor: pointer;
+    background: #0e1230;
+    border: 1px solid rgba(255,255,255,0.05);
+    user-select: none;
+    color: var(--text);
+  }
+  .cell.given { color: var(--text-dim); font-weight: 700; cursor: default; }
+  .cell.wrong { color: #ff5c6c; }
+  .cell:nth-child(3n) { border-right: 2px solid rgba(255,255,255,0.25); }
+  .cell:nth-child(9n) { border-right: 1px solid rgba(255,255,255,0.05); }
+  .row-thick { border-bottom: 2px solid rgba(255,255,255,0.25) !important; }
+  .cell.selected { background: rgba(124,247,201,0.22); }
+  .cell.peer { background: rgba(124,247,201,0.06); }
+  .cell.samevalue { background: rgba(79,209,255,0.18); }
+  .numpad { display: grid; grid-template-columns: repeat(9, 1fr); gap: 6px; width: 100%; max-width: 440px; }
+  .numpad button { aspect-ratio: 1/1; border-radius: 8px; border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); font-size: 16px; font-weight: 700; }
+  .numpad button:active { background: rgba(124,247,201,0.2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">SUDOKU</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>TIME <strong id="time">0:00</strong></div>
+    <div>HINTS <strong id="hints">3</strong></div>
+    <div>BEST <strong id="best">&mdash;</strong></div>
+  </div>
+  <div class="controls">
+    <button class="btn secondary" data-diff="easy">Easy</button>
+    <button class="btn secondary" data-diff="medium">Medium</button>
+    <button class="btn secondary" data-diff="hard">Hard</button>
+  </div>
+  <div class="stage" id="stage">
+    <div id="board"></div>
+    <div class="overlay" id="overlay">
+      <h2>SUDOKU</h2>
+      <p>Pick a difficulty to generate a fresh, uniquely-solvable puzzle.</p>
+      <button class="btn" id="startBtn">New Puzzle</button>
+    </div>
+  </div>
+  <div class="numpad" id="numpad"></div>
+  <div class="controls">
+    <button class="btn secondary" id="eraseBtn">Erase</button>
+    <button class="btn secondary" id="hintBtn">Hint</button>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const boardEl = document.getElementById("board");
+const overlay = document.getElementById("overlay");
+const timeEl = document.getElementById("time");
+const hintsEl = document.getElementById("hints");
+const bestEl = document.getElementById("best");
+const numpadEl = document.getElementById("numpad");
+const muteBtn = document.getElementById("muteBtn");
+
+function makeGrid() { return Array.from({ length: 9 }, () => Array(9).fill(0)); }
+function boxIndex(r, c) { return Math.floor(r / 3) * 3 + Math.floor(c / 3); }
+
+function isValid(grid, r, c, v) {
+  for (let i = 0; i < 9; i++) {
+    if (grid[r][i] === v) return false;
+    if (grid[i][c] === v) return false;
+  }
+  const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+  for (let dr = 0; dr < 3; dr++) for (let dc = 0; dc < 3; dc++) {
+    if (grid[br + dr][bc + dc] === v) return false;
+  }
+  return true;
+}
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function findEmpty(grid) {
+  for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0) return [r, c];
+  return null;
+}
+
+function fillSolution(grid) {
+  const spot = findEmpty(grid);
+  if (!spot) return true;
+  const [r, c] = spot;
+  for (const v of shuffle([1,2,3,4,5,6,7,8,9])) {
+    if (isValid(grid, r, c, v)) {
+      grid[r][c] = v;
+      if (fillSolution(grid)) return true;
+      grid[r][c] = 0;
+    }
+  }
+  return false;
+}
+
+function countSolutions(grid, limit) {
+  const spot = findEmpty(grid);
+  if (!spot) return 1;
+  const [r, c] = spot;
+  let count = 0;
+  for (let v = 1; v <= 9; v++) {
+    if (isValid(grid, r, c, v)) {
+      grid[r][c] = v;
+      count += countSolutions(grid, limit - count);
+      grid[r][c] = 0;
+      if (count >= limit) return count;
+    }
+  }
+  return count;
+}
+
+function generatePuzzle(clueTarget) {
+  const solution = makeGrid();
+  fillSolution(solution);
+  const puzzle = solution.map((row) => row.slice());
+  const positions = shuffle(Array.from({ length: 81 }, (_, i) => i));
+  let clues = 81;
+  for (const pos of positions) {
+    if (clues <= clueTarget) break;
+    const r = Math.floor(pos / 9), c = pos % 9;
+    if (puzzle[r][c] === 0) continue;
+    const backup = puzzle[r][c];
+    puzzle[r][c] = 0;
+    const testGrid = puzzle.map((row) => row.slice());
+    const solCount = countSolutions(testGrid, 2);
+    if (solCount === 1) { clues--; } else { puzzle[r][c] = backup; }
+  }
+  return { puzzle, solution };
+}
+
+const DIFFICULTY_CLUES = { easy: 45, medium: 36, hard: 30 };
+
+let puzzle, solution, given, entries, selected, hints, timerId, startTime, best, running;
+
+function buildBoard() {
+  boardEl.innerHTML = "";
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      if (r === 2 || r === 5) cell.classList.add("row-thick");
+      cell.dataset.r = r; cell.dataset.c = c;
+      cell.addEventListener("click", () => selectCell(r, c));
+      boardEl.appendChild(cell);
+    }
+  }
+}
+
+function buildNumpad() {
+  numpadEl.innerHTML = "";
+  for (let v = 1; v <= 9; v++) {
+    const btn = document.createElement("button");
+    btn.textContent = v;
+    btn.addEventListener("click", () => enterValue(v));
+    numpadEl.appendChild(btn);
+  }
+}
+
+function selectCell(r, c) {
+  if (!running) return;
+  selected = { r, c };
+  render();
+}
+
+function enterValue(v) {
+  if (!running || !selected || given[selected.r][selected.c]) return;
+  const { r, c } = selected;
+  entries[r][c] = v;
+  Sound.click();
+  render();
+  checkWin();
+}
+
+function eraseCell() {
+  if (!running || !selected || given[selected.r][selected.c]) return;
+  entries[selected.r][selected.c] = 0;
+  render();
+}
+
+function useHint() {
+  if (!running || hints <= 0) return;
+  let target = selected && !given[selected.r][selected.c] && entries[selected.r][selected.c] !== solution[selected.r][selected.c] ? selected : null;
+  if (!target) {
+    outer: for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+      if (!given[r][c] && entries[r][c] !== solution[r][c]) { target = { r, c }; break outer; }
+    }
+  }
+  if (!target) return;
+  entries[target.r][target.c] = solution[target.r][target.c];
+  hints--;
+  Sound.good();
+  hintsEl.textContent = hints;
+  render();
+  checkWin();
+}
+
+function currentValue(r, c) { return given[r][c] ? puzzle[r][c] : entries[r][c]; }
+
+function render() {
+  const cells = boardEl.children;
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const cell = cells[r * 9 + c];
+      const v = currentValue(r, c);
+      cell.textContent = v || "";
+      cell.classList.toggle("given", !!given[r][c]);
+      cell.classList.toggle("wrong", !given[r][c] && v !== 0 && v !== solution[r][c]);
+      cell.classList.toggle("selected", selected && selected.r === r && selected.c === c);
+      const isPeer = selected && (selected.r === r || selected.c === c || boxIndex(selected.r, selected.c) === boxIndex(r, c));
+      cell.classList.toggle("peer", !!isPeer && !(selected.r === r && selected.c === c));
+      const selVal = selected ? currentValue(selected.r, selected.c) : 0;
+      cell.classList.toggle("samevalue", !!selVal && v === selVal && !(selected.r === r && selected.c === c));
+    }
+  }
+}
+
+function checkWin() {
+  for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+    if (currentValue(r, c) !== solution[r][c]) return false;
+  }
+  running = false;
+  clearInterval(timerId);
+  Sound.win();
+  const elapsed = Date.now() - startTime;
+  const key = "sudoku-best-" + currentDifficulty;
+  const prevBest = Number(localStorage.getItem(key) || Infinity);
+  let note = "";
+  if (elapsed < prevBest) { localStorage.setItem(key, String(elapsed)); note = " — New best!"; }
+  bestEl.textContent = formatTime(Number(localStorage.getItem(key)));
+  overlay.innerHTML = `<h2>Solved!</h2><p>${currentDifficulty} in ${formatTime(elapsed)}${note}</p><button class="btn" id="startBtn2">New Puzzle</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", () => start(currentDifficulty));
+  return true;
+}
+
+function formatTime(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+let currentDifficulty = "medium";
+function start(diff) {
+  Sound.init();
+  currentDifficulty = diff;
+  overlay.style.display = "none";
+  const gen = generatePuzzle(DIFFICULTY_CLUES[diff]);
+  puzzle = gen.puzzle;
+  solution = gen.solution;
+  given = puzzle.map((row) => row.map((v) => v !== 0));
+  entries = makeGrid();
+  selected = null;
+  hints = 3;
+  hintsEl.textContent = hints;
+  running = true;
+  startTime = Date.now();
+  clearInterval(timerId);
+  timerId = setInterval(() => { timeEl.textContent = formatTime(Date.now() - startTime); }, 1000);
+  timeEl.textContent = "0:00";
+  const key = "sudoku-best-" + diff;
+  const b = localStorage.getItem(key);
+  bestEl.textContent = b ? formatTime(Number(b)) : "—";
+  render();
+}
+
+document.querySelectorAll("[data-diff]").forEach((btn) => btn.addEventListener("click", () => start(btn.dataset.diff)));
+document.getElementById("startBtn").addEventListener("click", () => start("medium"));
+document.getElementById("eraseBtn").addEventListener("click", eraseCell);
+document.getElementById("hintBtn").addEventListener("click", useHint);
+
+window.addEventListener("keydown", (e) => {
+  if (!selected) return;
+  if (/^[1-9]$/.test(e.key)) enterValue(Number(e.key));
+  else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") eraseCell();
+  else if (e.key === "ArrowUp") selectCell(Math.max(0, selected.r - 1), selected.c);
+  else if (e.key === "ArrowDown") selectCell(Math.min(8, selected.r + 1), selected.c);
+  else if (e.key === "ArrowLeft") selectCell(selected.r, Math.max(0, selected.c - 1));
+  else if (e.key === "ArrowRight") selectCell(selected.r, Math.min(8, selected.c + 1));
+});
+
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+buildBoard();
+buildNumpad();
+</script>
+</body>
+</html>

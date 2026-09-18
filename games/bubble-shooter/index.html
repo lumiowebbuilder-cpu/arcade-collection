@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Bubble Shooter — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 3/4; width: 100%; max-width: 420px; touch-action: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">BUBBLE SHOOTER</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SCORE <strong id="score">0</strong></div>
+    <div>SHOTS <strong id="shots">0</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>BUBBLE SHOOTER</h2>
+      <p>Aim with your pointer, click/tap to shoot. Match 3+ same-colored bubbles. Clear the board before it reaches the line.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const shotsEl = document.getElementById("shots");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const COLORS = ["#ff5c6c", "#ffe17d", "#7cf7c9", "#4fd1ff", "#c77dff", "#ff9a62"];
+const COLS = 8;
+const MAX_ROWS = 13;
+const DANGER_ROW = 11;
+
+let W, H, R, D, rowH, topMargin, leftMargin;
+let grid, launcher, aimAngle, flying, current, next, score, shots, best, running, shakeTime, parityOffset;
+
+function rowOdd(r) { return (r + parityOffset) % 2 === 1; }
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = rect.width; H = rect.height;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  R = W / (COLS * 2 + 1);
+  D = R * 2;
+  rowH = R * 1.73;
+  topMargin = R + 4;
+  leftMargin = R + 2;
+  launcher = { x: W / 2, y: H - 30 };
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function cellCenter(r, c) {
+  const shift = rowOdd(r) ? R : 0;
+  return { x: leftMargin + c * D + shift, y: topMargin + r * rowH };
+}
+
+function colsInRow(r) { return rowOdd(r) ? COLS - 1 : COLS; }
+
+function neighbors(r, c) {
+  const odd = rowOdd(r);
+  const list = odd
+    ? [[r,c-1],[r,c+1],[r-1,c],[r-1,c+1],[r+1,c],[r+1,c+1]]
+    : [[r,c-1],[r,c+1],[r-1,c-1],[r-1,c],[r+1,c-1],[r+1,c]];
+  return list.filter(([nr, nc]) => nr >= 0 && nr < MAX_ROWS && nc >= 0 && nc < colsInRow(nr));
+}
+
+function makeGrid() { return Array.from({ length: MAX_ROWS }, (_, r) => Array(colsInRow(r)).fill(null)); }
+
+function randomColorFromGrid() {
+  const present = new Set();
+  for (const row of grid) for (const v of row) if (v) present.add(v);
+  const pool = present.size ? [...present] : COLORS;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function fillInitial(rows) {
+  grid = makeGrid();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < colsInRow(r); c++) {
+      grid[r][c] = COLORS[Math.floor(Math.random() * COLORS.length)];
+    }
+  }
+}
+
+function nearestCell(x, y) {
+  let best = null, bestDist = Infinity;
+  for (let r = 0; r < MAX_ROWS; r++) {
+    for (let c = 0; c < colsInRow(r); c++) {
+      const p = cellCenter(r, c);
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bestDist) { bestDist = d; best = { r, c }; }
+    }
+  }
+  return best;
+}
+
+function findEmptyNear(x, y) {
+  const start = nearestCell(x, y);
+  if (!grid[start.r][start.c]) return start;
+  const visited = new Set([start.r + "," + start.c]);
+  const queue = [start];
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    for (const [nr, nc] of neighbors(cur.r, cur.c)) {
+      const k = nr + "," + nc;
+      if (visited.has(k)) continue;
+      visited.add(k);
+      if (!grid[nr][nc]) return { r: nr, c: nc };
+      queue.push({ r: nr, c: nc });
+    }
+  }
+  return null;
+}
+
+function sameColorGroup(r, c) {
+  const color = grid[r][c];
+  const visited = new Set([r + "," + c]);
+  const stack = [{ r, c }];
+  const group = [{ r, c }];
+  while (stack.length) {
+    const cur = stack.pop();
+    for (const [nr, nc] of neighbors(cur.r, cur.c)) {
+      const k = nr + "," + nc;
+      if (visited.has(k) || !grid[nr][nc] || grid[nr][nc] !== color) continue;
+      visited.add(k);
+      stack.push({ r: nr, c: nc });
+      group.push({ r: nr, c: nc });
+    }
+  }
+  return group;
+}
+
+function findFloating() {
+  const connected = new Set();
+  const queue = [];
+  for (let c = 0; c < colsInRow(0); c++) if (grid[0][c]) { connected.add("0," + c); queue.push({ r: 0, c }); }
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    for (const [nr, nc] of neighbors(cur.r, cur.c)) {
+      const k = nr + "," + nc;
+      if (connected.has(k) || !grid[nr][nc]) continue;
+      connected.add(k);
+      queue.push({ r: nr, c: nc });
+    }
+  }
+  const floating = [];
+  for (let r = 0; r < MAX_ROWS; r++) for (let c = 0; c < colsInRow(r); c++) {
+    if (grid[r][c] && !connected.has(r + "," + c)) floating.push({ r, c });
+  }
+  return floating;
+}
+
+function occupiedMaxRow() {
+  for (let r = MAX_ROWS - 1; r >= 0; r--) if (grid[r].some((v) => v)) return r;
+  return -1;
+}
+
+function shoot() {
+  if (!running || flying) return;
+  const vx = Math.cos(aimAngle) * 480, vy = Math.sin(aimAngle) * 480;
+  flying = { x: launcher.x, y: launcher.y, vx, vy, color: current };
+  shots++;
+  Sound.click();
+}
+
+function update(dt) {
+  if (!running) return;
+  if (shakeTime > 0) shakeTime -= dt;
+  if (!flying) return;
+  flying.x += flying.vx * dt;
+  flying.y += flying.vy * dt;
+  if (flying.x < R) { flying.x = R; flying.vx *= -1; }
+  if (flying.x > W - R) { flying.x = W - R; flying.vx *= -1; }
+
+  let landed = flying.y <= topMargin;
+  if (!landed) {
+    for (let r = 0; r < MAX_ROWS && !landed; r++) {
+      for (let c = 0; c < colsInRow(r); c++) {
+        if (!grid[r][c]) continue;
+        const p = cellCenter(r, c);
+        if (Math.hypot(p.x - flying.x, p.y - flying.y) < D * 0.92) { landed = true; break; }
+      }
+    }
+  }
+
+  if (landed) {
+    const cell = findEmptyNear(flying.x, flying.y);
+    if (cell) {
+      grid[cell.r][cell.c] = flying.color;
+      const group = sameColorGroup(cell.r, cell.c);
+      if (group.length >= 3) {
+        for (const g of group) grid[g.r][g.c] = null;
+        score += group.length * 10;
+        Sound.coin();
+        const floating = findFloating();
+        if (floating.length) {
+          for (const f of floating) grid[f.r][f.c] = null;
+          score += floating.length * 20;
+          Sound.win();
+        }
+      } else {
+        Sound.move();
+      }
+    }
+    flying = null;
+    current = next;
+    next = randomColorFromGrid();
+    updateHud();
+
+    if (grid.flat().every((v) => !v)) { levelClear(); return; }
+    if (occupiedMaxRow() >= DANGER_ROW) { endGame(); return; }
+    if (shots > 0 && shots % 6 === 0) pushRowDown();
+  }
+}
+
+function pushRowDown() {
+  // Shifting every row down by one changes which rows are visually "offset" (odd),
+  // since offset is determined by absolute row index. Toggling parityOffset keeps
+  // each row's existing content aligned with its new hex-grid position (verified:
+  // rowOdd(r-1) under the old offset always equals rowOdd(r) under the toggled one).
+  parityOffset = 1 - parityOffset;
+  grid.pop();
+  const newColors = [];
+  for (let c = 0; c < colsInRow(0); c++) newColors.push(COLORS[Math.floor(Math.random() * COLORS.length)]);
+  grid.unshift(newColors);
+  if (occupiedMaxRow() >= DANGER_ROW) endGame();
+}
+
+function levelClear() {
+  Sound.win();
+  score += 200;
+  fillInitial(5);
+  updateHud();
+}
+
+function endGame() {
+  running = false;
+  Sound.bad();
+  if (score > best) { best = score; localStorage.setItem("bubbles-best", String(best)); }
+  overlay.innerHTML = `<h2>Game Over</h2><p>Score: ${score} in ${shots} shots</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  updateHud();
+}
+
+function updateHud() {
+  scoreEl.textContent = score;
+  shotsEl.textContent = shots;
+  bestEl.textContent = best;
+}
+
+function draw() {
+  if (!R) return;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#05061a";
+  ctx.fillRect(0, 0, W, H);
+  if (!grid) return;
+
+  ctx.strokeStyle = "rgba(255,92,108,0.25)";
+  ctx.setLineDash([5, 4]);
+  const dangerY = topMargin + DANGER_ROW * rowH + R;
+  ctx.beginPath(); ctx.moveTo(0, dangerY); ctx.lineTo(W, dangerY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const drawBall = (x, y, color) => {
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(x, y, R * 0.92, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  };
+
+  for (let r = 0; r < MAX_ROWS; r++) for (let c = 0; c < colsInRow(r); c++) {
+    if (grid[r][c]) { const p = cellCenter(r, c); drawBall(p.x, p.y, grid[r][c]); }
+  }
+
+  if (flying) drawBall(flying.x, flying.y, flying.color);
+
+  if (running) {
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath();
+    ctx.moveTo(launcher.x, launcher.y);
+    ctx.lineTo(launcher.x + Math.cos(aimAngle) * 200, launcher.y + Math.sin(aimAngle) * 200);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (current) drawBall(launcher.x, launcher.y, current);
+    if (next) { ctx.globalAlpha = 0.5; drawBall(launcher.x - 30, launcher.y, next); ctx.globalAlpha = 1; }
+  }
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.033);
+  lastTime = t;
+  update(dt);
+  draw();
+  if (running) requestAnimationFrame(loop);
+}
+
+function setAim(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = clientX - rect.left, y = clientY - rect.top;
+  let angle = Math.atan2(y - launcher.y, x - launcher.x);
+  const minA = -Math.PI + 0.15, maxA = -0.15;
+  if (angle > maxA) angle = maxA;
+  if (angle < minA) angle = minA;
+  aimAngle = angle;
+  draw();
+}
+canvas.addEventListener("pointermove", (e) => setAim(e.clientX, e.clientY));
+canvas.addEventListener("pointerdown", (e) => { setAim(e.clientX, e.clientY); shoot(); });
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  parityOffset = 0;
+  fillInitial(5);
+  score = 0; shots = 0; running = true; flying = null;
+  aimAngle = -Math.PI / 2;
+  current = randomColorFromGrid();
+  next = randomColorFromGrid();
+  updateHud();
+  lastTime = performance.now();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) { running = false; overlay.innerHTML = `<h2>Paused</h2><p>Score: ${score}</p><button class="btn" id="resumeBtn">Resume</button>`; overlay.style.display = "flex"; document.getElementById("resumeBtn").addEventListener("click", () => { overlay.style.display = "none"; running = true; lastTime = performance.now(); requestAnimationFrame(loop); }); }
+});
+
+best = Number(localStorage.getItem("bubbles-best") || 0);
+resize();
+</script>
+</body>
+</html>

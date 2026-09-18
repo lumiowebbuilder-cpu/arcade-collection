@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Asteroids — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 4/3; width: 100%; max-width: 620px; touch-action: none; }
+  .touch-controls { display: flex; justify-content: space-between; width: 100%; max-width: 620px; }
+  .touch-controls button { border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); border-radius: 10px; padding: 14px 18px; font-size: 16px; }
+  .touch-controls button:active { background: rgba(124,247,201,0.25); }
+  @media (min-width: 720px) { .touch-controls { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">ASTEROIDS</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SCORE <strong id="score">0</strong></div>
+    <div>LIVES <strong id="lives">3</strong></div>
+    <div>LEVEL <strong id="level">1</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>ASTEROIDS</h2>
+      <p>&larr;&rarr; or A/D rotate, &uarr; or W thrust, Space fire. Clear the field. Watch for the UFO.</p>
+      <button class="btn" id="startBtn">Launch</button>
+    </div>
+  </div>
+  <div class="touch-controls">
+    <button id="leftBtn">&larr;</button>
+    <button id="thrustBtn">THRUST</button>
+    <button id="fireBtn">FIRE</button>
+    <button id="rightBtn">&rarr;</button>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+const levelEl = document.getElementById("level");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const W = 640, H = 480;
+const SIZES = { large: { r: 45, speed: [40, 70], score: 20 }, medium: { r: 25, speed: [60, 100], score: 50 }, small: { r: 12, speed: [90, 140], score: 100 } };
+const NEXT_SIZE = { large: "medium", medium: "small", small: null };
+
+let ship, bullets, ufoBullets, asteroids, ufo, ufoTimer, score, lives, level, best, running, invulnTimer;
+const input = { left: false, right: false, thrust: false, fire: false };
+let fireCooldown = 0;
+
+function rnd(a, b) { return a + Math.random() * (b - a); }
+
+function wrap(pos) {
+  if (pos.x < 0) pos.x += W; if (pos.x > W) pos.x -= W;
+  if (pos.y < 0) pos.y += H; if (pos.y > H) pos.y -= H;
+}
+
+function makeAsteroidShape() {
+  const points = [];
+  const n = 10;
+  for (let i = 0; i < n; i++) points.push(rnd(0.75, 1.2));
+  return points;
+}
+
+function spawnAsteroid(size, x, y) {
+  const def = SIZES[size];
+  let pos;
+  if (x === undefined) {
+    do { pos = { x: rnd(0, W), y: rnd(0, H) }; } while (Math.hypot(pos.x - ship.x, pos.y - ship.y) < 140);
+  } else pos = { x, y };
+  const angle = rnd(0, Math.PI * 2);
+  const speed = rnd(def.speed[0], def.speed[1]);
+  asteroids.push({
+    x: pos.x, y: pos.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+    size, r: def.r, spin: rnd(-1, 1), rot: 0, shape: makeAsteroidShape(),
+  });
+}
+
+function resetShip() {
+  ship = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, r: 12 };
+  invulnTimer = 2;
+}
+
+function startLevel(n) {
+  asteroids = [];
+  const count = Math.min(3 + n, 9);
+  for (let i = 0; i < count; i++) spawnAsteroid("large");
+  ufo = null;
+  ufoTimer = rnd(12, 20);
+}
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = (rect.width * H / W) + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function fireBullet(from, angle, owner) {
+  const speed = 340;
+  const list = owner === "ship" ? bullets : ufoBullets;
+  list.push({ x: from.x + Math.cos(angle) * 16, y: from.y + Math.sin(angle) * 16, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 1.1 });
+}
+
+function spawnUfo() {
+  const fromLeft = Math.random() < 0.5;
+  ufo = { x: fromLeft ? -20 : W + 20, y: rnd(60, H - 60), vx: (fromLeft ? 1 : -1) * rnd(60, 90), vy: rnd(-20, 20), r: 16, fireTimer: 1 };
+}
+
+function update(dt) {
+  if (!running) return;
+
+  if (invulnTimer > 0) invulnTimer -= dt;
+  if (fireCooldown > 0) fireCooldown -= dt;
+
+  if (input.left) ship.angle -= 3.2 * dt;
+  if (input.right) ship.angle += 3.2 * dt;
+  if (input.thrust) {
+    ship.vx += Math.cos(ship.angle) * 220 * dt;
+    ship.vy += Math.sin(ship.angle) * 220 * dt;
+  }
+  ship.vx *= (1 - 0.6 * dt);
+  ship.vy *= (1 - 0.6 * dt);
+  const speed = Math.hypot(ship.vx, ship.vy);
+  if (speed > 260) { ship.vx = ship.vx / speed * 260; ship.vy = ship.vy / speed * 260; }
+  ship.x += ship.vx * dt; ship.y += ship.vy * dt;
+  wrap(ship);
+
+  if (input.fire && fireCooldown <= 0) {
+    fireBullet(ship, ship.angle, "ship");
+    fireCooldown = 0.25;
+    Sound.click();
+  }
+
+  for (const b of bullets) { b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; wrap(b); }
+  bullets = bullets.filter((b) => b.life > 0);
+  for (const b of ufoBullets) { b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; wrap(b); }
+  ufoBullets = ufoBullets.filter((b) => b.life > 0);
+
+  for (const a of asteroids) { a.x += a.vx * dt; a.y += a.vy * dt; a.rot += a.spin * dt; wrap(a); }
+
+  if (!ufo) {
+    ufoTimer -= dt;
+    if (ufoTimer <= 0) spawnUfo();
+  } else {
+    ufo.x += ufo.vx * dt; ufo.y += ufo.vy * dt;
+    ufo.y += Math.sin(performance.now() / 400) * 20 * dt;
+    ufo.fireTimer -= dt;
+    if (ufo.fireTimer <= 0) {
+      const angle = Math.atan2(ship.y - ufo.y, ship.x - ufo.x) + rnd(-0.3, 0.3);
+      fireBullet(ufo, angle, "ufo");
+      ufo.fireTimer = 1.4;
+    }
+    if (ufo.x < -40 || ufo.x > W + 40) ufo = null;
+  }
+
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    let hit = false;
+    for (let j = asteroids.length - 1; j >= 0; j--) {
+      const a = asteroids[j];
+      if (Math.hypot(b.x - a.x, b.y - a.y) < a.r) {
+        destroyAsteroid(j);
+        hit = true;
+        break;
+      }
+    }
+    if (!hit && ufo && Math.hypot(b.x - ufo.x, b.y - ufo.y) < ufo.r) {
+      score += 200;
+      Sound.coin();
+      ufo = null;
+      ufoTimer = rnd(12, 20);
+      hit = true;
+    }
+    if (hit) bullets.splice(i, 1);
+  }
+
+  if (invulnTimer <= 0) {
+    for (const a of asteroids) {
+      if (Math.hypot(ship.x - a.x, ship.y - a.y) < a.r + ship.r) { shipHit(); break; }
+    }
+    for (let i = ufoBullets.length - 1; i >= 0; i--) {
+      const b = ufoBullets[i];
+      if (Math.hypot(ship.x - b.x, ship.y - b.y) < ship.r + 3) { ufoBullets.splice(i, 1); shipHit(); break; }
+    }
+  }
+
+  if (asteroids.length === 0) {
+    level++;
+    Sound.win();
+    startLevel(level);
+  }
+
+  updateHud();
+}
+
+function destroyAsteroid(idx) {
+  const a = asteroids[idx];
+  score += SIZES[a.size].score;
+  Sound.coin();
+  const next = NEXT_SIZE[a.size];
+  asteroids.splice(idx, 1);
+  if (next) {
+    for (let i = 0; i < 2; i++) spawnAsteroid(next, a.x, a.y);
+  }
+}
+
+function shipHit() {
+  lives--;
+  Sound.bad();
+  if (lives <= 0) { lives = 0; endGame(); return; }
+  resetShip();
+}
+
+function endGame() {
+  running = false;
+  Sound.bad();
+  if (score > best) { best = score; localStorage.setItem("asteroids-best", String(best)); }
+  overlay.innerHTML = `<h2>Game Over</h2><p>Score: ${score} &middot; Reached level ${level}</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  updateHud();
+}
+
+function updateHud() {
+  scoreEl.textContent = score;
+  livesEl.textContent = lives;
+  levelEl.textContent = level;
+  bestEl.textContent = best;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#05061a";
+  ctx.fillRect(0, 0, W, H);
+  if (!ship) return;
+
+  ctx.strokeStyle = "#7cf7c9";
+  ctx.lineWidth = 1.5;
+  for (const a of asteroids) {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.rot);
+    ctx.beginPath();
+    a.shape.forEach((mult, i) => {
+      const ang = (i / a.shape.length) * Math.PI * 2;
+      const px = Math.cos(ang) * a.r * mult, py = Math.sin(ang) * a.r * mult;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.fillStyle = "#ffe17d";
+  for (const b of bullets) { ctx.beginPath(); ctx.arc(b.x, b.y, 2.2, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = "#ff5c6c";
+  for (const b of ufoBullets) { ctx.beginPath(); ctx.arc(b.x, b.y, 2.5, 0, Math.PI * 2); ctx.fill(); }
+
+  if (ufo) {
+    ctx.strokeStyle = "#c77dff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(ufo.x, ufo.y, 18, 9, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(ufo.x, ufo.y - 6, 8, 6, 0, Math.PI, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  if (invulnTimer <= 0 || Math.floor(performance.now() / 100) % 2 === 0) {
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.angle);
+    ctx.strokeStyle = "#4fd1ff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(14, 0);
+    ctx.lineTo(-10, 9);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-10, -9);
+    ctx.closePath();
+    ctx.stroke();
+    if (input.thrust) {
+      ctx.strokeStyle = "#ff9a62";
+      ctx.beginPath();
+      ctx.moveTo(-6, 0); ctx.lineTo(-16, 0);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.033);
+  lastTime = t;
+  update(dt);
+  draw();
+  if (running) requestAnimationFrame(loop);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  score = 0; lives = 3; level = 1;
+  bullets = []; ufoBullets = [];
+  resetShip();
+  startLevel(1);
+  running = true;
+  updateHud();
+  lastTime = performance.now();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (["arrowleft","arrowright","arrowup"," ","a","d","w"].includes(k)) e.preventDefault();
+  if (k === "arrowleft" || k === "a") input.left = true;
+  else if (k === "arrowright" || k === "d") input.right = true;
+  else if (k === "arrowup" || k === "w") input.thrust = true;
+  else if (k === " ") input.fire = true;
+});
+window.addEventListener("keyup", (e) => {
+  const k = e.key.toLowerCase();
+  if (k === "arrowleft" || k === "a") input.left = false;
+  else if (k === "arrowright" || k === "d") input.right = false;
+  else if (k === "arrowup" || k === "w") input.thrust = false;
+  else if (k === " ") input.fire = false;
+});
+function bindHold(el, onDown, onUp) {
+  el.addEventListener("pointerdown", (e) => { e.preventDefault(); onDown(); });
+  ["pointerup","pointerleave","pointercancel"].forEach((ev) => el.addEventListener(ev, onUp));
+}
+bindHold(document.getElementById("leftBtn"), () => (input.left = true), () => (input.left = false));
+bindHold(document.getElementById("rightBtn"), () => (input.right = true), () => (input.right = false));
+bindHold(document.getElementById("thrustBtn"), () => (input.thrust = true), () => (input.thrust = false));
+bindHold(document.getElementById("fireBtn"), () => (input.fire = true), () => (input.fire = false));
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) { running = false; overlay.innerHTML = `<h2>Paused</h2><p>Score: ${score}</p><button class="btn" id="resumeBtn">Resume</button>`; overlay.style.display = "flex"; document.getElementById("resumeBtn").addEventListener("click", () => { overlay.style.display = "none"; running = true; lastTime = performance.now(); requestAnimationFrame(loop); }); }
+});
+
+best = Number(localStorage.getItem("asteroids-best") || 0);
+resize();
+</script>
+</body>
+</html>
