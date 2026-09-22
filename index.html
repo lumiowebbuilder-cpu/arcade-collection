@@ -4,13 +4,39 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Arcade Collection</title>
+<meta name="description" content="Twenty-nine small, dependency-free browser games — arcade classics, deep-system strategy games, reimagined board games, and five completely original mechanics." />
+<meta name="theme-color" content="#0b0f2a" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230b0f2a'/%3E%3Ccircle cx='50' cy='50' r='30' fill='none' stroke='%237cf7c9' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='10' fill='%237cf7c9'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="shared/style.css" />
 <style>
   .hero { text-align: center; margin: 10px 0 4px; }
-  .hero h1 { font-size: 30px; margin: 0 0 8px; text-shadow: 0 0 24px rgba(124,247,201,0.4); }
+  .hero h1 { font-size: clamp(26px, 6vw, 32px); margin: 0 0 8px; text-shadow: 0 0 24px rgba(124,247,201,0.4); }
   .hero p { color: var(--text-dim); font-size: 14px; margin: 0; }
+
+  .search-row { width: 100%; position: sticky; top: 0; z-index: 10; padding: 10px 0; margin: 0 -16px; padding-left: 16px; padding-right: 16px; background: linear-gradient(var(--bg) 65%, transparent); }
+  .search-box { position: relative; width: 100%; }
+  .search-box input {
+    width: 100%;
+    padding: 12px 16px 12px 40px;
+    border-radius: 12px;
+    font-size: 15px;
+  }
+  .search-box svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); opacity: 0.5; pointer-events: none; }
+  .search-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+  .clear-search { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; text-decoration: underline; padding: 4px; display: none; }
+  .clear-search.visible { display: inline; }
+
+  .jump-pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  .jump-pills a {
+    font-size: 12px; color: var(--text-dim); text-decoration: none;
+    padding: 6px 12px; border-radius: 999px; border: 1px solid var(--panel-border);
+    background: var(--panel); transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .jump-pills a:hover { color: var(--accent); border-color: var(--accent); }
+
   .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; width: 100%; }
   @media (min-width: 480px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
+
   .tile {
     background: var(--panel);
     border: 1px solid var(--panel-border);
@@ -21,62 +47,145 @@
     align-items: center;
     gap: 8px;
     text-align: center;
-    transition: transform 0.12s, border-color 0.12s;
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    height: 100%;
   }
-  .tile:hover { transform: translateY(-3px); border-color: var(--accent); }
+  .tile:hover { transform: translateY(-3px); border-color: var(--accent); background: rgba(255,255,255,0.09); }
   .tile .emoji { font-size: 30px; }
   .tile .name { font-weight: 700; font-size: 14px; }
   .tile .desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
-  .section-label { width: 100%; font-size: 12px; letter-spacing: 0.12em; color: var(--text-dim); text-transform: uppercase; margin: 14px 0 -2px; text-align: center; }
   .tile .badge { font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--purple); background: rgba(199,125,255,0.15); border-radius: 999px; padding: 2px 7px; }
+
+  .game-section { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .section-label { width: 100%; font-size: 12px; letter-spacing: 0.12em; color: var(--text-dim); text-transform: uppercase; margin-top: 8px; text-align: center; scroll-margin-top: 70px; }
+
+  .no-results { display: none; text-align: center; color: var(--text-dim); font-size: 14px; padding: 40px 20px; }
+  .no-results.visible { display: block; }
+
+  footer { color: var(--text-dim); font-size: 12px; text-align: center; margin-top: 12px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="hero">
     <h1>ARCADE COLLECTION</h1>
-    <p>Twenty-nine small games. Pick one.</p>
+    <p id="gameCountLabel">Twenty-nine small games. Pick one.</p>
   </div>
-  <div class="tiles">
-    <a class="home-tile" href="games/snake/index.html"><div class="tile"><div class="emoji">🐍</div><div class="name">Snake</div><div class="desc">Grow long, don't bite yourself</div></div></a>
-    <a class="home-tile" href="games/2048/index.html"><div class="tile"><div class="emoji">🔢</div><div class="name">2048</div><div class="desc">Slide &amp; merge to the target tile</div></div></a>
-    <a class="home-tile" href="games/breakout/index.html"><div class="tile"><div class="emoji">🧱</div><div class="name">Breakout</div><div class="desc">Paddle, ball, bricks</div></div></a>
-    <a class="home-tile" href="games/block-drop/index.html"><div class="tile"><div class="emoji">🟪</div><div class="name">Block Drop</div><div class="desc">Falling blocks, clear lines</div></div></a>
-    <a class="home-tile" href="games/memory-match/index.html"><div class="tile"><div class="emoji">🪐</div><div class="name">Memory Match</div><div class="desc">Flip cards, find pairs</div></div></a>
-    <a class="home-tile" href="games/minesweeper/index.html"><div class="tile"><div class="emoji">💣</div><div class="name">Minesweeper</div><div class="desc">Logic, flags, and nerve</div></div></a>
-    <a class="home-tile" href="games/flap/index.html"><div class="tile"><div class="emoji">🐤</div><div class="name">Flap</div><div class="desc">Thread the pipe gaps</div></div></a>
-    <a class="home-tile" href="games/platformer/index.html"><div class="tile"><div class="emoji">🏃</div><div class="name">Platformer</div><div class="desc">Run, jump, reach the flag</div></div></a>
-    <a class="home-tile" href="games/pong/index.html"><div class="tile"><div class="emoji">🏓</div><div class="name">Pong</div><div class="desc">Beat the CPU paddle</div></div></a>
-    <a class="home-tile" href="games/word-guess/index.html"><div class="tile"><div class="emoji">🔤</div><div class="name">Word Guess</div><div class="desc">Six tries to nail the word</div></div></a>
+
+  <nav class="jump-pills" aria-label="Jump to category">
+    <a href="#sec-arcade">Quick Arcade</a>
+    <a href="#sec-deep">Deeper Systems</a>
+    <a href="#sec-classics">Classics</a>
+    <a href="#sec-original">Never Seen Before</a>
+  </nav>
+
+  <div class="search-row">
+    <form class="search-box" role="search" onsubmit="return false;">
+      <label for="searchInput" class="visually-hidden">Search games by name or description</label>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="searchInput" type="search" placeholder="Search 29 games..." autocomplete="off" />
+    </form>
+    <div class="search-meta">
+      <span id="resultCount"></span>
+      <button class="clear-search" id="clearSearch" type="button">Clear</button>
+    </div>
   </div>
-  <div class="section-label">Deeper systems &middot; longer runs</div>
-  <div class="tiles">
-    <a class="home-tile" href="games/chess/index.html"><div class="tile"><div class="emoji">♟️</div><div class="name">Chess</div><div class="badge">AI</div><div class="desc">Full rules, play vs. a minimax AI</div></div></a>
-    <a class="home-tile" href="games/roguelike/index.html"><div class="tile"><div class="emoji">🗡️</div><div class="name">Descent</div><div class="badge">Roguelike</div><div class="desc">Procedural dungeon, permadeath</div></div></a>
-    <a class="home-tile" href="games/tower-defense/index.html"><div class="tile"><div class="emoji">🏰</div><div class="name">Bastion</div><div class="badge">Strategy</div><div class="desc">15 waves, towers &amp; economy</div></div></a>
-    <a class="home-tile" href="games/card-battler/index.html"><div class="tile"><div class="emoji">🃏</div><div class="name">Ember Deck</div><div class="badge">Deckbuilder</div><div class="desc">6-fight roguelike card run</div></div></a>
-    <a class="home-tile" href="games/tactics/index.html"><div class="tile"><div class="emoji">⚔️</div><div class="name">Vanguard</div><div class="badge">Tactics</div><div class="desc">Telegraphed grid combat, 4 levels</div></div></a>
-  </div>
-  <div class="section-label">Classics, reimagined</div>
-  <div class="tiles">
-    <a class="home-tile" href="games/sudoku/index.html"><div class="tile"><div class="emoji">🔢</div><div class="name">Sudoku</div><div class="desc">Generated puzzles, always unique</div></div></a>
-    <a class="home-tile" href="games/connect-four/index.html"><div class="tile"><div class="emoji">🔴</div><div class="name">Connect Four</div><div class="badge">AI</div><div class="desc">Drop 4 in a row vs. a minimax AI</div></div></a>
-    <a class="home-tile" href="games/asteroids/index.html"><div class="tile"><div class="emoji">🚀</div><div class="name">Asteroids</div><div class="desc">Thrust, drift, blast rocks &amp; a UFO</div></div></a>
-    <a class="home-tile" href="games/bubble-shooter/index.html"><div class="tile"><div class="emoji">🫧</div><div class="name">Bubble Shooter</div><div class="desc">Aim, pop, clear the ceiling</div></div></a>
-    <a class="home-tile" href="games/solitaire/index.html"><div class="tile"><div class="emoji">🂡</div><div class="name">Solitaire</div><div class="desc">Full Klondike, tap to play</div></div></a>
-    <a class="home-tile" href="games/mastermind/index.html"><div class="tile"><div class="emoji">🎯</div><div class="name">Mastermind</div><div class="desc">Crack the 4-peg color code</div></div></a>
-    <a class="home-tile" href="games/lights-out/index.html"><div class="tile"><div class="emoji">💡</div><div class="name">Lights Out</div><div class="desc">Toggle tiles, clear the board</div></div></a>
-    <a class="home-tile" href="games/battleship/index.html"><div class="tile"><div class="emoji">🚢</div><div class="name">Battleship</div><div class="badge">AI</div><div class="desc">Sink the fleet vs. a hunting AI</div></div></a>
-    <a class="home-tile" href="games/hopper/index.html"><div class="tile"><div class="emoji">🐸</div><div class="name">Hopper</div><div class="desc">Cross the road, don't get squashed</div></div></a>
-  </div>
-  <div class="section-label">Never seen before</div>
-  <div class="tiles">
-    <a class="home-tile" href="games/orbit-golf/index.html"><div class="tile"><div class="emoji">🕳️</div><div class="name">Orbit Golf</div><div class="badge">Original</div><div class="desc">Bend putts with gravity wells</div></div></a>
-    <a class="home-tile" href="games/word-tower/index.html"><div class="tile"><div class="emoji">🔤</div><div class="name">Word Tower</div><div class="badge">Original</div><div class="desc">Chain words, stack blocks, don't lean too far</div></div></a>
-    <a class="home-tile" href="games/echo-maze/index.html"><div class="tile"><div class="emoji">📡</div><div class="name">Echo Maze</div><div class="badge">Original</div><div class="desc">Ping to see &mdash; but so can the hunter</div></div></a>
-    <a class="home-tile" href="games/rewind-runner/index.html"><div class="tile"><div class="emoji">👻</div><div class="name">Rewind Runner</div><div class="badge">Original</div><div class="desc">Cooperate with your own ghost, 3s late</div></div></a>
-    <a class="home-tile" href="games/field-runner/index.html"><div class="tile"><div class="emoji">🧲</div><div class="name">Field Runner</div><div class="badge">Original</div><div class="desc">Your cursor isn't where you think it is</div></div></a>
-  </div>
+
+  <section class="game-section" id="sec-arcade" aria-labelledby="lbl-arcade">
+    <h2 class="section-label" id="lbl-arcade">Quick arcade games</h2>
+    <div class="tiles">
+      <a class="home-tile" href="games/snake/index.html" data-name="Snake" data-desc="Grow long, don't bite yourself"><div class="tile"><div class="emoji" aria-hidden="true">🐍</div><div class="name">Snake</div><div class="desc">Grow long, don't bite yourself</div></div></a>
+      <a class="home-tile" href="games/2048/index.html" data-name="2048" data-desc="Slide and merge to the target tile"><div class="tile"><div class="emoji" aria-hidden="true">🔢</div><div class="name">2048</div><div class="desc">Slide &amp; merge to the target tile</div></div></a>
+      <a class="home-tile" href="games/breakout/index.html" data-name="Breakout" data-desc="Paddle, ball, bricks"><div class="tile"><div class="emoji" aria-hidden="true">🧱</div><div class="name">Breakout</div><div class="desc">Paddle, ball, bricks</div></div></a>
+      <a class="home-tile" href="games/block-drop/index.html" data-name="Block Drop" data-desc="Falling blocks, clear lines"><div class="tile"><div class="emoji" aria-hidden="true">🟪</div><div class="name">Block Drop</div><div class="desc">Falling blocks, clear lines</div></div></a>
+      <a class="home-tile" href="games/memory-match/index.html" data-name="Memory Match" data-desc="Flip cards, find pairs"><div class="tile"><div class="emoji" aria-hidden="true">🪐</div><div class="name">Memory Match</div><div class="desc">Flip cards, find pairs</div></div></a>
+      <a class="home-tile" href="games/minesweeper/index.html" data-name="Minesweeper" data-desc="Logic, flags, and nerve"><div class="tile"><div class="emoji" aria-hidden="true">💣</div><div class="name">Minesweeper</div><div class="desc">Logic, flags, and nerve</div></div></a>
+      <a class="home-tile" href="games/flap/index.html" data-name="Flap" data-desc="Thread the pipe gaps"><div class="tile"><div class="emoji" aria-hidden="true">🐤</div><div class="name">Flap</div><div class="desc">Thread the pipe gaps</div></div></a>
+      <a class="home-tile" href="games/platformer/index.html" data-name="Platformer" data-desc="Run, jump, reach the flag"><div class="tile"><div class="emoji" aria-hidden="true">🏃</div><div class="name">Platformer</div><div class="desc">Run, jump, reach the flag</div></div></a>
+      <a class="home-tile" href="games/pong/index.html" data-name="Pong" data-desc="Beat the CPU paddle"><div class="tile"><div class="emoji" aria-hidden="true">🏓</div><div class="name">Pong</div><div class="desc">Beat the CPU paddle</div></div></a>
+      <a class="home-tile" href="games/word-guess/index.html" data-name="Word Guess" data-desc="Six tries to nail the word"><div class="tile"><div class="emoji" aria-hidden="true">🔤</div><div class="name">Word Guess</div><div class="desc">Six tries to nail the word</div></div></a>
+    </div>
+  </section>
+
+  <section class="game-section" id="sec-deep" aria-labelledby="lbl-deep">
+    <h2 class="section-label" id="lbl-deep">Deeper systems &middot; longer runs</h2>
+    <div class="tiles">
+      <a class="home-tile" href="games/chess/index.html" data-name="Chess" data-desc="Full rules, play vs a minimax AI"><div class="tile"><div class="emoji" aria-hidden="true">♟️</div><div class="name">Chess</div><div class="badge">AI</div><div class="desc">Full rules, play vs. a minimax AI</div></div></a>
+      <a class="home-tile" href="games/roguelike/index.html" data-name="Descent" data-desc="Procedural dungeon, permadeath, roguelike"><div class="tile"><div class="emoji" aria-hidden="true">🗡️</div><div class="name">Descent</div><div class="badge">Roguelike</div><div class="desc">Procedural dungeon, permadeath</div></div></a>
+      <a class="home-tile" href="games/tower-defense/index.html" data-name="Bastion" data-desc="15 waves, towers and economy, strategy, tower defense"><div class="tile"><div class="emoji" aria-hidden="true">🏰</div><div class="name">Bastion</div><div class="badge">Strategy</div><div class="desc">15 waves, towers &amp; economy</div></div></a>
+      <a class="home-tile" href="games/card-battler/index.html" data-name="Ember Deck" data-desc="6-fight roguelike card run, deckbuilder"><div class="tile"><div class="emoji" aria-hidden="true">🃏</div><div class="name">Ember Deck</div><div class="badge">Deckbuilder</div><div class="desc">6-fight roguelike card run</div></div></a>
+      <a class="home-tile" href="games/tactics/index.html" data-name="Vanguard" data-desc="Telegraphed grid combat, 4 levels, tactics"><div class="tile"><div class="emoji" aria-hidden="true">⚔️</div><div class="name">Vanguard</div><div class="badge">Tactics</div><div class="desc">Telegraphed grid combat, 4 levels</div></div></a>
+    </div>
+  </section>
+
+  <section class="game-section" id="sec-classics" aria-labelledby="lbl-classics">
+    <h2 class="section-label" id="lbl-classics">Classics, reimagined</h2>
+    <div class="tiles">
+      <a class="home-tile" href="games/sudoku/index.html" data-name="Sudoku" data-desc="Generated puzzles, always unique"><div class="tile"><div class="emoji" aria-hidden="true">🔢</div><div class="name">Sudoku</div><div class="desc">Generated puzzles, always unique</div></div></a>
+      <a class="home-tile" href="games/connect-four/index.html" data-name="Connect Four" data-desc="Drop 4 in a row vs a minimax AI"><div class="tile"><div class="emoji" aria-hidden="true">🔴</div><div class="name">Connect Four</div><div class="badge">AI</div><div class="desc">Drop 4 in a row vs. a minimax AI</div></div></a>
+      <a class="home-tile" href="games/asteroids/index.html" data-name="Asteroids" data-desc="Thrust, drift, blast rocks and a UFO"><div class="tile"><div class="emoji" aria-hidden="true">🚀</div><div class="name">Asteroids</div><div class="desc">Thrust, drift, blast rocks &amp; a UFO</div></div></a>
+      <a class="home-tile" href="games/bubble-shooter/index.html" data-name="Bubble Shooter" data-desc="Aim, pop, clear the ceiling"><div class="tile"><div class="emoji" aria-hidden="true">🫧</div><div class="name">Bubble Shooter</div><div class="desc">Aim, pop, clear the ceiling</div></div></a>
+      <a class="home-tile" href="games/solitaire/index.html" data-name="Solitaire" data-desc="Full Klondike, tap to play"><div class="tile"><div class="emoji" aria-hidden="true">🂡</div><div class="name">Solitaire</div><div class="desc">Full Klondike, tap to play</div></div></a>
+      <a class="home-tile" href="games/mastermind/index.html" data-name="Mastermind" data-desc="Crack the 4-peg color code"><div class="tile"><div class="emoji" aria-hidden="true">🎯</div><div class="name">Mastermind</div><div class="desc">Crack the 4-peg color code</div></div></a>
+      <a class="home-tile" href="games/lights-out/index.html" data-name="Lights Out" data-desc="Toggle tiles, clear the board"><div class="tile"><div class="emoji" aria-hidden="true">💡</div><div class="name">Lights Out</div><div class="desc">Toggle tiles, clear the board</div></div></a>
+      <a class="home-tile" href="games/battleship/index.html" data-name="Battleship" data-desc="Sink the fleet vs a hunting AI"><div class="tile"><div class="emoji" aria-hidden="true">🚢</div><div class="name">Battleship</div><div class="badge">AI</div><div class="desc">Sink the fleet vs. a hunting AI</div></div></a>
+      <a class="home-tile" href="games/hopper/index.html" data-name="Hopper" data-desc="Cross the road, don't get squashed, frogger"><div class="tile"><div class="emoji" aria-hidden="true">🐸</div><div class="name">Hopper</div><div class="desc">Cross the road, don't get squashed</div></div></a>
+    </div>
+  </section>
+
+  <section class="game-section" id="sec-original" aria-labelledby="lbl-original">
+    <h2 class="section-label" id="lbl-original">Never seen before</h2>
+    <div class="tiles">
+      <a class="home-tile" href="games/orbit-golf/index.html" data-name="Orbit Golf" data-desc="Bend putts with gravity wells"><div class="tile"><div class="emoji" aria-hidden="true">🕳️</div><div class="name">Orbit Golf</div><div class="badge">Original</div><div class="desc">Bend putts with gravity wells</div></div></a>
+      <a class="home-tile" href="games/word-tower/index.html" data-name="Word Tower" data-desc="Chain words, stack blocks, don't lean too far"><div class="tile"><div class="emoji" aria-hidden="true">🔤</div><div class="name">Word Tower</div><div class="badge">Original</div><div class="desc">Chain words, stack blocks, don't lean too far</div></div></a>
+      <a class="home-tile" href="games/echo-maze/index.html" data-name="Echo Maze" data-desc="Ping to see but so can the hunter"><div class="tile"><div class="emoji" aria-hidden="true">📡</div><div class="name">Echo Maze</div><div class="badge">Original</div><div class="desc">Ping to see &mdash; but so can the hunter</div></div></a>
+      <a class="home-tile" href="games/rewind-runner/index.html" data-name="Rewind Runner" data-desc="Cooperate with your own ghost, 3 seconds late"><div class="tile"><div class="emoji" aria-hidden="true">👻</div><div class="name">Rewind Runner</div><div class="badge">Original</div><div class="desc">Cooperate with your own ghost, 3s late</div></div></a>
+      <a class="home-tile" href="games/field-runner/index.html" data-name="Field Runner" data-desc="Your cursor isn't where you think it is"><div class="tile"><div class="emoji" aria-hidden="true">🧲</div><div class="name">Field Runner</div><div class="badge">Original</div><div class="desc">Your cursor isn't where you think it is</div></div></a>
+    </div>
+  </section>
+
+  <p class="no-results" id="noResults">No games match your search.</p>
+
+  <footer>29 games &middot; no build step &middot; no dependencies &middot; runs entirely in your browser</footer>
 </div>
+<script>
+  const searchInput = document.getElementById("searchInput");
+  const clearBtn = document.getElementById("clearSearch");
+  const resultCount = document.getElementById("resultCount");
+  const noResults = document.getElementById("noResults");
+  const allTiles = Array.from(document.querySelectorAll("a.home-tile"));
+  const sections = Array.from(document.querySelectorAll(".game-section"));
+  const totalGames = allTiles.length;
+
+  function applyFilter() {
+    const q = searchInput.value.trim().toLowerCase();
+    clearBtn.classList.toggle("visible", q.length > 0);
+    let visibleCount = 0;
+
+    allTiles.forEach((tile) => {
+      const haystack = (tile.dataset.name + " " + tile.dataset.desc).toLowerCase();
+      const match = q === "" || haystack.includes(q);
+      tile.style.display = match ? "" : "none";
+      if (match) visibleCount++;
+    });
+
+    sections.forEach((section) => {
+      const anyVisible = Array.from(section.querySelectorAll("a.home-tile")).some((t) => t.style.display !== "none");
+      section.style.display = anyVisible ? "" : "none";
+    });
+
+    resultCount.textContent = q === "" ? `${totalGames} games` : `${visibleCount} of ${totalGames} games`;
+    noResults.classList.toggle("visible", visibleCount === 0);
+  }
+
+  searchInput.addEventListener("input", applyFilter);
+  clearBtn.addEventListener("click", () => { searchInput.value = ""; applyFilter(); searchInput.focus(); });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "/" && document.activeElement !== searchInput) { e.preventDefault(); searchInput.focus(); }
+    if (e.key === "Escape" && document.activeElement === searchInput) { searchInput.value = ""; applyFilter(); searchInput.blur(); }
+  });
+
+  applyFilter();
+</script>
 </body>
 </html>
