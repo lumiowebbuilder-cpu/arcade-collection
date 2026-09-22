@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Hopper — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 9/10; width: 100%; max-width: 420px; touch-action: none; }
+  .touch-controls { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 6px; }
+  .touch-controls button { border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); border-radius: 10px; font-size: 18px; }
+  .touch-controls button:active { background: rgba(124,247,201,0.25); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">HOPPER</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SCORE <strong id="score">0</strong></div>
+    <div>LIVES <strong id="lives">3</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>HOPPER</h2>
+      <p>Arrow keys or WASD to hop one square at a time. Cross the road without getting hit. Each crossing speeds up the traffic.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+  <div class="touch-controls" id="pad">
+    <span></span><button data-d="up">&uarr;</button><span></span>
+    <button data-d="left">&larr;</button><span></span><button data-d="right">&rarr;</button>
+    <span></span><button data-d="down">&darr;</button><span></span>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const COLS = 9, ROWS = 9;
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+let cellPx, player, lanes, score, lives, running, best, difficulty, invulnTimer;
+const ROAD_ROWS = [1, 3, 5, 7];
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = (rect.width * ROWS / COLS) * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = (rect.width * ROWS / COLS) + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cellPx = rect.width / COLS;
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function buildLanes() {
+  lanes = [];
+  for (let r = 0; r < ROWS; r++) {
+    if (!ROAD_ROWS.includes(r)) { lanes.push({ type: "safe" }); continue; }
+    const dir = ROAD_ROWS.indexOf(r) % 2 === 0 ? 1 : -1;
+    const baseSpeed = (1.1 + Math.random() * 0.6) * difficulty;
+    const carCount = 2 + Math.floor(Math.random() * 2);
+    const cars = [];
+    const spacing = COLS / carCount;
+    for (let i = 0; i < carCount; i++) {
+      cars.push({ x: i * spacing + Math.random() * spacing * 0.4, w: 1.3 });
+    }
+    lanes.push({ type: "road", dir, speed: baseSpeed, cars, color: `hsl(${(r * 47) % 360}, 60%, 55%)` });
+  }
+}
+
+function resetPlayer() { player = { row: ROWS - 1, col: Math.floor(COLS / 2) }; }
+
+function tryMove(dr, dc) {
+  if (!running) return;
+  const nr = Math.max(0, Math.min(ROWS - 1, player.row + dr));
+  const nc = Math.max(0, Math.min(COLS - 1, player.col + dc));
+  if (nr === player.row && nc === player.col) return;
+  player.row = nr; player.col = nc;
+  Sound.move();
+  if (player.row === 0) crossed();
+  draw();
+}
+
+function crossed() {
+  score++;
+  Sound.win();
+  difficulty = Math.min(2.6, difficulty + 0.12);
+  resetPlayer();
+  buildLanes();
+  updateHud();
+}
+
+function loseLife() {
+  if (invulnTimer > 0) return;
+  lives--;
+  Sound.bad();
+  invulnTimer = 0.8;
+  resetPlayer();
+  updateHud();
+  if (lives <= 0) endGame();
+}
+
+function update(dt) {
+  if (!running) return;
+  if (invulnTimer > 0) invulnTimer -= dt;
+
+  for (const lane of lanes) {
+    if (lane.type !== "road") continue;
+    for (const car of lane.cars) {
+      car.x += lane.dir * lane.speed * dt;
+      if (lane.dir > 0 && car.x > COLS) car.x = -car.w;
+      if (lane.dir < 0 && car.x < -car.w) car.x = COLS;
+    }
+  }
+
+  const laneAtPlayer = lanes[player.row];
+  if (laneAtPlayer.type === "road" && invulnTimer <= 0) {
+    for (const car of laneAtPlayer.cars) {
+      if (player.col + 0.9 > car.x && player.col < car.x + car.w) { loseLife(); break; }
+    }
+  }
+}
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  if (!lanes) { ctx.fillStyle = "#0b0f2a"; ctx.fillRect(0, 0, rect.width, rect.height); return; }
+
+  for (let r = 0; r < ROWS; r++) {
+    const lane = lanes[r];
+    ctx.fillStyle = lane.type === "road" ? "#1a1e3d" : (r === 0 ? "#0b2a1e" : "#141a3a");
+    ctx.fillRect(0, r * cellPx, rect.width, cellPx);
+    if (lane.type === "road") {
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath(); ctx.moveTo(0, (r + 0.5) * cellPx); ctx.lineTo(rect.width, (r + 0.5) * cellPx); ctx.stroke();
+      ctx.setLineDash([]);
+      for (const car of lane.cars) {
+        ctx.fillStyle = lane.color;
+        ctx.shadowColor = lane.color; ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.roundRect(car.x * cellPx, r * cellPx + cellPx * 0.15, car.w * cellPx, cellPx * 0.7, 4);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+
+  if (player) {
+    ctx.globalAlpha = invulnTimer > 0 && Math.floor(performance.now() / 100) % 2 === 0 ? 0.4 : 1;
+    ctx.fillStyle = "#7cf7c9";
+    ctx.shadowColor = "#7cf7c9"; ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc((player.col + 0.5) * cellPx, (player.row + 0.5) * cellPx, cellPx * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+}
+
+function updateHud() { scoreEl.textContent = score; livesEl.textContent = lives; bestEl.textContent = best; }
+
+function endGame() {
+  running = false;
+  Sound.bad();
+  if (score > best) { best = score; localStorage.setItem("hopper-best", String(best)); }
+  overlay.innerHTML = `<h2>Squashed!</h2><p>Score: ${score}${score===best&&score>0?" — New best!":""}</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  updateHud();
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.033);
+  lastTime = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  score = 0; lives = 3; difficulty = 1; invulnTimer = 0;
+  resetPlayer();
+  buildLanes();
+  running = true;
+  updateHud();
+  draw();
+}
+
+window.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (["arrowup","arrowdown","arrowleft","arrowright","w","a","s","d"].includes(k)) e.preventDefault();
+  if (k === "arrowup" || k === "w") tryMove(-1, 0);
+  else if (k === "arrowdown" || k === "s") tryMove(1, 0);
+  else if (k === "arrowleft" || k === "a") tryMove(0, -1);
+  else if (k === "arrowright" || k === "d") tryMove(0, 1);
+});
+document.getElementById("pad").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-d]");
+  if (!btn) return;
+  const m = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
+  tryMove(...m[btn.dataset.d]);
+});
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) { running = false; overlay.innerHTML = `<h2>Paused</h2><p>Score: ${score}</p><button class="btn" id="resumeBtn">Resume</button>`; overlay.style.display = "flex"; document.getElementById("resumeBtn").addEventListener("click", () => { overlay.style.display = "none"; running = true; lastTime = performance.now(); }); }
+});
+
+best = Number(localStorage.getItem("hopper-best") || 0);
+resize();
+lastTime = performance.now();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Mastermind — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #board { display: flex; flex-direction: column-reverse; gap: 6px; width: 100%; max-width: 360px; max-height: 360px; overflow-y: auto; padding: 4px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 8px; }
+  .row.current { background: rgba(255,255,255,0.05); }
+  .pegs { display: flex; gap: 6px; }
+  .peg { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.15); cursor: pointer; }
+  .peg.empty { background: rgba(255,255,255,0.04); }
+  .feedback { display: grid; grid-template-columns: repeat(2, 8px); gap: 3px; margin-left: 4px; }
+  .fpeg { width: 8px; height: 8px; border-radius: 50%; }
+  .fpeg.black { background: #fff; }
+  .fpeg.white { background: #888; }
+  .fpeg.none { background: transparent; }
+  .palette { display: flex; gap: 8px; justify-content: center; }
+  .swatch { width: 38px; height: 38px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); cursor: pointer; }
+  .swatch:active { transform: scale(0.92); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">MASTERMIND</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>GUESSES <strong id="guessCount">0</strong>/10</div>
+    <div>STREAK <strong id="streak">0</strong></div>
+    <div>BEST <strong id="best">&mdash;</strong></div>
+  </div>
+  <div class="stage" id="stage" style="min-height: 420px;">
+    <div id="board"></div>
+    <div class="overlay" id="overlay">
+      <h2>MASTERMIND</h2>
+      <p>Crack the 4-peg color code in 10 guesses or fewer. White pins mean right color, wrong spot. Black pins mean right color, right spot. Colors can repeat.</p>
+      <button class="btn" id="startBtn">New Code</button>
+    </div>
+  </div>
+  <div class="palette" id="palette"></div>
+  <div class="controls">
+    <button class="btn secondary" id="clearBtn">Clear</button>
+    <button class="btn" id="submitBtn" disabled>Submit Guess</button>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const CODE_LENGTH = 4;
+const MAX_GUESSES = 10;
+const COLORS = ["#ff5c6c", "#ffe17d", "#7cf7c9", "#4fd1ff", "#c77dff", "#ff9a62"];
+
+const boardEl = document.getElementById("board");
+const overlay = document.getElementById("overlay");
+const guessCountEl = document.getElementById("guessCount");
+const streakEl = document.getElementById("streak");
+const bestEl = document.getElementById("best");
+const paletteEl = document.getElementById("palette");
+const clearBtn = document.getElementById("clearBtn");
+const submitBtn = document.getElementById("submitBtn");
+const muteBtn = document.getElementById("muteBtn");
+
+let secret, guesses, current, running, streak, best;
+
+function scoreGuess(guess, secretCode) {
+  let black = 0;
+  const secretRemain = [], guessRemain = [];
+  for (let i = 0; i < CODE_LENGTH; i++) {
+    if (guess[i] === secretCode[i]) black++;
+    else { secretRemain.push(secretCode[i]); guessRemain.push(guess[i]); }
+  }
+  let white = 0;
+  const counts = {};
+  for (const c of secretRemain) counts[c] = (counts[c] || 0) + 1;
+  for (const c of guessRemain) if (counts[c] > 0) { white++; counts[c]--; }
+  return { black, white };
+}
+
+function buildPalette() {
+  paletteEl.innerHTML = "";
+  COLORS.forEach((color, idx) => {
+    const sw = document.createElement("div");
+    sw.className = "swatch";
+    sw.style.background = color;
+    sw.addEventListener("click", () => pickColor(idx));
+    paletteEl.appendChild(sw);
+  });
+}
+
+function pickColor(idx) {
+  if (!running) return;
+  const emptyIdx = current.indexOf(null);
+  if (emptyIdx === -1) return;
+  current[emptyIdx] = idx;
+  Sound.click();
+  render();
+}
+
+function clearCurrent() {
+  if (!running) return;
+  current = Array(CODE_LENGTH).fill(null);
+  render();
+}
+
+function submitGuess() {
+  if (!running || current.includes(null)) return;
+  const guess = [...current];
+  const fb = scoreGuess(guess, secret);
+  guesses.push({ guess, fb });
+  Sound.click();
+  current = Array(CODE_LENGTH).fill(null);
+
+  if (fb.black === CODE_LENGTH) {
+    win();
+  } else if (guesses.length >= MAX_GUESSES) {
+    lose();
+  } else {
+    render();
+  }
+}
+
+function win() {
+  running = false;
+  Sound.win();
+  streak++;
+  const guessesUsed = guesses.length;
+  if (!best || guessesUsed < best) { best = guessesUsed; localStorage.setItem("mastermind-best", String(best)); }
+  localStorage.setItem("mastermind-streak", String(streak));
+  overlay.innerHTML = `<h2>Cracked it!</h2><p>Solved in ${guessesUsed} guess${guessesUsed===1?"":"es"}.</p><button class="btn" id="startBtn2">New Code</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  render();
+}
+
+function lose() {
+  running = false;
+  Sound.bad();
+  streak = 0;
+  localStorage.setItem("mastermind-streak", "0");
+  const codeSwatches = secret.map((c) => `<span style="display:inline-block;width:18px;height:18px;border-radius:50%;background:${COLORS[c]};margin:0 2px;"></span>`).join("");
+  overlay.innerHTML = `<h2>Out of guesses</h2><p>The code was: ${codeSwatches}</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  render();
+}
+
+function render() {
+  boardEl.innerHTML = "";
+
+  if (running) {
+    const row = document.createElement("div");
+    row.className = "row current";
+    const pegs = document.createElement("div");
+    pegs.className = "pegs";
+    current.forEach((c, i) => {
+      const peg = document.createElement("div");
+      peg.className = "peg" + (c === null ? " empty" : "");
+      if (c !== null) peg.style.background = COLORS[c];
+      peg.addEventListener("click", () => { if (c !== null) { current[i] = null; render(); } });
+      pegs.appendChild(peg);
+    });
+    row.appendChild(pegs);
+    boardEl.appendChild(row);
+  }
+
+  for (const g of guesses) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const pegs = document.createElement("div");
+    pegs.className = "pegs";
+    g.guess.forEach((c) => {
+      const peg = document.createElement("div");
+      peg.className = "peg";
+      peg.style.background = COLORS[c];
+      pegs.appendChild(peg);
+    });
+    row.appendChild(pegs);
+    const fb = document.createElement("div");
+    fb.className = "feedback";
+    const dots = [...Array(g.fb.black).fill("black"), ...Array(g.fb.white).fill("white"), ...Array(CODE_LENGTH - g.fb.black - g.fb.white).fill("none")];
+    dots.forEach((k) => { const d = document.createElement("div"); d.className = "fpeg " + k; fb.appendChild(d); });
+    row.appendChild(fb);
+    boardEl.appendChild(row);
+  }
+
+  guessCountEl.textContent = guesses.length;
+  streakEl.textContent = streak;
+  bestEl.textContent = best ? best : "—";
+  submitBtn.disabled = !running || current.includes(null);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  secret = Array.from({ length: CODE_LENGTH }, () => Math.floor(Math.random() * COLORS.length));
+  guesses = [];
+  current = Array(CODE_LENGTH).fill(null);
+  running = true;
+  render();
+}
+
+submitBtn.addEventListener("click", submitGuess);
+clearBtn.addEventListener("click", clearCurrent);
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+streak = Number(localStorage.getItem("mastermind-streak") || 0);
+best = Number(localStorage.getItem("mastermind-best") || 0) || null;
+buildPalette();
+current = Array(CODE_LENGTH).fill(null);
+guesses = [];
+render();
+</script>
+</body>
+</html>

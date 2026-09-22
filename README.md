@@ -1,6 +1,6 @@
 # Arcade Collection
 
-Twenty-five small, dependency-free browser games. Each one is a single
+Twenty-nine small, dependency-free browser games. Each one is a single
 self-contained HTML file (inline CSS/JS, no build step, no framework) sharing
 a small common stylesheet and a synthesized Web Audio sound effects helper.
 
@@ -46,6 +46,15 @@ a small common stylesheet and a synthesized Web Audio sound effects helper.
   floating-cluster detection, a rising ceiling for pressure
 - **Solitaire** — full Klondike: tableau sequences, foundations, stock/waste
   recycling, double-click-to-foundation
+- **Mastermind** — crack a 4-peg color code in 10 guesses; black/white peg
+  feedback correctly handles duplicate colors on both sides
+- **Lights Out** — toggle-grid puzzle where every generated puzzle is
+  provably solvable by construction (scrambled via the same toggle it takes
+  to solve, since the toggle operation is its own inverse)
+- **Battleship** — auto-placed fleets, a hunt-target AI that chases adjacent
+  cells after landing a hit instead of firing randomly
+- **Hopper** — a Frogger-style lane crosser: dodge continuously moving,
+  wrapping traffic across multiple road lanes, difficulty ramps each crossing
 
 ## Never seen before
 
@@ -81,4 +90,4 @@ node server.js
 ```
 
 Then open [http://localhost:3500](http://localhost:3500) for the hub page
-linking to all twenty-five games.
+linking to all twenty-nine games.
