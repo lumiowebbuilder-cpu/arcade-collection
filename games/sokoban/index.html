@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Crate Pusher — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 1/1; width: 100%; max-width: 420px; touch-action: none; }
+  .touch-controls { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 6px; }
+  .touch-controls button { border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); border-radius: 10px; font-size: 18px; }
+  .touch-controls button:active { background: rgba(124,247,201,0.25); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">CRATE PUSHER</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>LEVEL <strong id="levelNum">1</strong>/6</div>
+    <div>MOVES <strong id="moves">0</strong></div>
+    <div>BEST <strong id="best">0</strong>/6</div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>CRATE PUSHER</h2>
+      <p>Push every crate onto a glowing target. You can only push, never pull, and never push two crates at once.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+  <div class="controls-row" style="display:flex; gap:10px; align-items:center;">
+    <div class="touch-controls" id="pad">
+      <span></span><button data-d="up">&uarr;</button><span></span>
+      <button data-d="left">&larr;</button><span></span><button data-d="right">&rarr;</button>
+      <span></span><button data-d="down">&darr;</button><span></span>
+    </div>
+    <button class="btn secondary" id="undoBtn">Undo</button>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const levelNumEl = document.getElementById("levelNum");
+const movesEl = document.getElementById("moves");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const LEVELS = [
+`#####
+#@$.#
+#####`,
+`#######
+#.    #
+# $   #
+#  @  #
+#   $ #
+#    .#
+#######`,
+`#######
+#     #
+# .$@ #
+#     #
+# $.  #
+#     #
+#######`,
+`########
+#  .   #
+#  $   #
+# @$.  #
+#      #
+########`,
+`#########
+#   #   #
+# $ # $ #
+#.@  .  #
+#   #   #
+#########`,
+`#########
+#.  #  .#
+# $ # $ #
+#  @$   #
+#   #   #
+#########`,
+];
+
+function parseLevel(str) {
+  const rows = str.split("\n");
+  const walls = new Set(), targets = new Set();
+  let crates = new Set(), player = null;
+  rows.forEach((row, r) => {
+    [...row].forEach((ch, c) => {
+      const k = r + "," + c;
+      if (ch === "#") walls.add(k);
+      if (ch === "." || ch === "*" || ch === "+") targets.add(k);
+      if (ch === "$" || ch === "*") crates.add(k);
+      if (ch === "@" || ch === "+") player = { r, c };
+    });
+  });
+  return { walls, targets, crates, player, rows: rows.length, cols: Math.max(...rows.map((r) => r.length)) };
+}
+
+let level, state, moves, running, best, history, cellPx;
+
+function cloneState(s) { return { player: { ...s.player }, crates: new Set(s.crates) }; }
+
+function tryMove(dr, dc) {
+  if (!running) return;
+  const nr = state.player.r + dr, nc = state.player.c + dc;
+  const key = nr + "," + nc;
+  if (level.walls.has(key)) return;
+  if (state.crates.has(key)) {
+    const beyondKey = (nr + dr) + "," + (nc + dc);
+    if (level.walls.has(beyondKey) || state.crates.has(beyondKey)) return;
+    history.push(cloneState(state));
+    state.crates.delete(key);
+    state.crates.add(beyondKey);
+    state.player = { r: nr, c: nc };
+    moves++;
+    Sound.click();
+    if (isWon()) { winLevel(); return; }
+  } else {
+    history.push(cloneState(state));
+    state.player = { r: nr, c: nc };
+    moves++;
+    Sound.move();
+  }
+  render();
+}
+
+function isWon() {
+  for (const t of level.targets) if (!state.crates.has(t)) return false;
+  return true;
+}
+
+function undo() {
+  if (!running || history.length === 0) return;
+  state = history.pop();
+  moves = Math.max(0, moves - 1);
+  Sound.click();
+  render();
+}
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = rect.height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (level) cellPx = rect.width / Math.max(level.cols, level.rows);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "#05061a";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+  if (!level) return;
+  const offX = (rect.width - level.cols * cellPx) / 2;
+  const offY = (rect.width - level.rows * cellPx) / 2;
+
+  for (const key of level.walls) {
+    const [r, c] = key.split(",").map(Number);
+    ctx.fillStyle = "#1c2550";
+    ctx.fillRect(offX + c * cellPx, offY + r * cellPx, cellPx, cellPx);
+  }
+  for (let r = 0; r < level.rows; r++) for (let c = 0; c < level.cols; c++) {
+    const key = r + "," + c;
+    if (level.walls.has(key)) continue;
+    ctx.fillStyle = "#12162e";
+    ctx.fillRect(offX + c * cellPx, offY + r * cellPx, cellPx, cellPx);
+  }
+  for (const key of level.targets) {
+    const [r, c] = key.split(",").map(Number);
+    ctx.strokeStyle = "#ffe17d";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(offX + c * cellPx + cellPx / 2, offY + r * cellPx + cellPx / 2, cellPx * 0.22, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  for (const key of state.crates) {
+    const [r, c] = key.split(",").map(Number);
+    const onTarget = level.targets.has(key);
+    ctx.fillStyle = onTarget ? "#7cf7c9" : "#ff9a62";
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.roundRect(offX + c * cellPx + cellPx * 0.12, offY + r * cellPx + cellPx * 0.12, cellPx * 0.76, cellPx * 0.76, 5);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  ctx.fillStyle = "#4fd1ff";
+  ctx.shadowColor = "#4fd1ff";
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.arc(offX + state.player.c * cellPx + cellPx / 2, offY + state.player.r * cellPx + cellPx / 2, cellPx * 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  movesEl.textContent = moves;
+  levelNumEl.textContent = levelIdx + 1;
+  bestEl.textContent = best;
+}
+
+let levelIdx;
+function winLevel() {
+  running = false;
+  Sound.win();
+  if (levelIdx + 1 > best) { best = levelIdx + 1; localStorage.setItem("sokoban-best", String(best)); }
+  if (levelIdx >= LEVELS.length - 1) {
+    overlay.innerHTML = `<h2>All levels cleared!</h2><p>Nice pushing.</p><button class="btn" id="startBtn2">Play Again</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("startBtn2").addEventListener("click", () => { levelIdx = 0; start(); });
+  } else {
+    overlay.innerHTML = `<h2>Level ${levelIdx + 1} clear!</h2><p>${moves} moves</p><button class="btn" id="nextBtn">Next Level</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("nextBtn").addEventListener("click", () => { levelIdx++; start(); });
+  }
+  draw();
+}
+
+function loadLevel(idx) {
+  level = parseLevel(LEVELS[idx]);
+  state = { player: level.player, crates: new Set(level.crates) };
+  moves = 0;
+  history = [];
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  loadLevel(levelIdx);
+  running = true;
+  resize();
+  draw();
+}
+
+window.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (["arrowup","arrowdown","arrowleft","arrowright","w","a","s","d","u"].includes(k)) e.preventDefault();
+  if (k === "arrowup" || k === "w") tryMove(-1, 0);
+  else if (k === "arrowdown" || k === "s") tryMove(1, 0);
+  else if (k === "arrowleft" || k === "a") tryMove(0, -1);
+  else if (k === "arrowright" || k === "d") tryMove(0, 1);
+  else if (k === "u") undo();
+});
+document.getElementById("pad").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-d]");
+  if (!btn) return;
+  const m = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
+  tryMove(...m[btn.dataset.d]);
+});
+document.getElementById("undoBtn").addEventListener("click", undo);
+
+document.getElementById("startBtn").addEventListener("click", () => { levelIdx = 0; start(); });
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("sokoban-best") || 0);
+levelIdx = 0;
+loadLevel(0);
+running = false;
+resize();
+</script>
+<script src="../../shared/ads.js"></script>
+</body>
+</html>

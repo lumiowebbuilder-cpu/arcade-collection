@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Star Defender — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 3/4; width: 100%; max-width: 420px; touch-action: none; }
+  .touch-controls { display: flex; justify-content: space-between; width: 100%; max-width: 420px; }
+  .touch-controls button { border: 1px solid var(--panel-border); background: var(--panel); color: var(--text); border-radius: 10px; padding: 14px 20px; font-size: 18px; }
+  .touch-controls button:active { background: rgba(124,247,201,0.25); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">STAR DEFENDER</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SCORE <strong id="score">0</strong></div>
+    <div>LIVES <strong id="lives">3</strong></div>
+    <div>WAVE <strong id="wave">1</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>STAR DEFENDER</h2>
+      <p>&larr;&rarr; or A/D to move, Space to fire. Clear every wave before the formation reaches you.</p>
+      <button class="btn" id="startBtn">Launch</button>
+    </div>
+  </div>
+  <div class="touch-controls">
+    <button id="leftBtn">&larr;</button>
+    <button id="fireBtn">FIRE</button>
+    <button id="rightBtn">&rarr;</button>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+const waveEl = document.getElementById("wave");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const W = 360, H = 480;
+const ENEMY_COLS = 7;
+let ENEMY_ROWS = 3;
+
+let player, bullets, enemyBullets, enemies, formation, score, lives, wave, running, best;
+const input = { left: false, right: false, fire: false };
+let fireCooldown = 0;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = (rect.width * H / W) + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function buildWave() {
+  enemies = [];
+  const spacingX = 36, spacingY = 34, startX = 30, startY = 40;
+  for (let r = 0; r < ENEMY_ROWS; r++) {
+    for (let c = 0; c < ENEMY_COLS; c++) {
+      enemies.push({ col: c, row: r, baseX: startX + c * spacingX, baseY: startY + r * spacingY, alive: true });
+    }
+  }
+  formation = { x: 0, y: 0, dir: 1, speed: 24 + wave * 4 };
+}
+
+function resetPlayer() { player = { x: W / 2, y: H - 30, w: 22, h: 16 }; }
+
+function aliveEnemies() { return enemies.filter((e) => e.alive); }
+
+function update(dt) {
+  if (!running) return;
+  if (fireCooldown > 0) fireCooldown -= dt;
+
+  if (input.left) player.x -= 200 * dt;
+  if (input.right) player.x += 200 * dt;
+  player.x = Math.max(player.w / 2, Math.min(W - player.w / 2, player.x));
+  if (input.fire && fireCooldown <= 0) {
+    bullets.push({ x: player.x, y: player.y - 12 });
+    fireCooldown = 0.32;
+    Sound.click();
+  }
+
+  const alive = aliveEnemies();
+  if (alive.length) {
+    const minX = Math.min(...alive.map((e) => e.baseX)) + formation.x;
+    const maxX = Math.max(...alive.map((e) => e.baseX)) + formation.x;
+    formation.x += formation.dir * formation.speed * dt;
+    if (maxX > W - 24 || minX < 24) {
+      formation.dir *= -1;
+      formation.y += 16;
+    }
+  }
+
+  for (const e of alive) {
+    if (Math.random() < 0.004 * dt * 60) {
+      enemyBullets.push({ x: e.baseX + formation.x, y: e.baseY + formation.y + 10 });
+    }
+  }
+
+  bullets.forEach((b) => (b.y -= 320 * dt));
+  bullets = bullets.filter((b) => b.y > -10);
+  enemyBullets.forEach((b) => (b.y += 180 * dt));
+  enemyBullets = enemyBullets.filter((b) => b.y < H + 10);
+
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    for (const e of alive) {
+      const ex = e.baseX + formation.x, ey = e.baseY + formation.y;
+      if (Math.abs(b.x - ex) < 14 && Math.abs(b.y - ey) < 12) {
+        e.alive = false;
+        bullets.splice(i, 1);
+        score += 10;
+        Sound.coin();
+        break;
+      }
+    }
+  }
+
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    const b = enemyBullets[i];
+    if (Math.abs(b.x - player.x) < 14 && Math.abs(b.y - player.y) < 12) {
+      enemyBullets.splice(i, 1);
+      loseLife();
+      if (!running) return;
+    }
+  }
+
+  for (const e of alive) {
+    if (e.baseY + formation.y > player.y - 20) { loseLife(); if (!running) return; break; }
+  }
+
+  if (alive.length === 0) { nextWave(); return; }
+
+  updateHud();
+}
+
+function loseLife() {
+  lives--;
+  Sound.bad();
+  if (lives <= 0) { endGame(); return; }
+  resetPlayer();
+  enemyBullets = [];
+}
+
+function nextWave() {
+  wave++;
+  ENEMY_ROWS = Math.min(5, 3 + Math.floor(wave / 3));
+  Sound.win();
+  score += 50;
+  buildWave();
+  updateHud();
+}
+
+function endGame() {
+  running = false;
+  Sound.bad();
+  if (score > best) { best = score; localStorage.setItem("stardefender-best", String(best)); }
+  overlay.innerHTML = `<h2>Game Over</h2><p>Score: ${score} &middot; Wave ${wave}</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  updateHud();
+}
+
+function updateHud() {
+  scoreEl.textContent = score; livesEl.textContent = lives; waveEl.textContent = wave; bestEl.textContent = best;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#05061a";
+  ctx.fillRect(0, 0, W, H);
+  if (!player) return;
+
+  ctx.fillStyle = "#ff9a62";
+  for (const e of aliveEnemies()) {
+    const ex = e.baseX + formation.x, ey = e.baseY + formation.y;
+    ctx.shadowColor = "#ff9a62"; ctx.shadowBlur = 4;
+    ctx.beginPath();
+    ctx.roundRect(ex - 12, ey - 9, 24, 18, 4);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#ffe17d";
+  for (const b of bullets) ctx.fillRect(b.x - 2, b.y - 6, 4, 10);
+  ctx.fillStyle = "#ff5c6c";
+  for (const b of enemyBullets) ctx.fillRect(b.x - 2, b.y - 5, 4, 10);
+
+  ctx.fillStyle = "#4fd1ff";
+  ctx.shadowColor = "#4fd1ff"; ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.moveTo(player.x, player.y - player.h);
+  ctx.lineTo(player.x + player.w / 2, player.y + player.h / 2);
+  ctx.lineTo(player.x - player.w / 2, player.y + player.h / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+let lastTime;
+function loop(t) {
+  const dt = Math.min((t - lastTime) / 1000, 0.033);
+  lastTime = t;
+  update(dt);
+  draw();
+  if (running) requestAnimationFrame(loop);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  score = 0; lives = 3; wave = 1; ENEMY_ROWS = 3;
+  bullets = []; enemyBullets = [];
+  resetPlayer();
+  buildWave();
+  running = true;
+  updateHud();
+  draw();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (["arrowleft","arrowright"," ","a","d"].includes(k)) e.preventDefault();
+  if (k === "arrowleft" || k === "a") input.left = true;
+  else if (k === "arrowright" || k === "d") input.right = true;
+  else if (k === " ") input.fire = true;
+});
+window.addEventListener("keyup", (e) => {
+  const k = e.key.toLowerCase();
+  if (k === "arrowleft" || k === "a") input.left = false;
+  else if (k === "arrowright" || k === "d") input.right = false;
+  else if (k === " ") input.fire = false;
+});
+function bindHold(el, onDown, onUp) {
+  el.addEventListener("pointerdown", (e) => { e.preventDefault(); onDown(); });
+  ["pointerup","pointerleave","pointercancel"].forEach((ev) => el.addEventListener(ev, onUp));
+}
+bindHold(document.getElementById("leftBtn"), () => (input.left = true), () => (input.left = false));
+bindHold(document.getElementById("rightBtn"), () => (input.right = true), () => (input.right = false));
+bindHold(document.getElementById("fireBtn"), () => (input.fire = true), () => (input.fire = false));
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) { running = false; overlay.innerHTML = `<h2>Paused</h2><p>Score: ${score}</p><button class="btn" id="resumeBtn">Resume</button>`; overlay.style.display = "flex"; document.getElementById("resumeBtn").addEventListener("click", () => { overlay.style.display = "none"; running = true; lastTime = performance.now(); requestAnimationFrame(loop); }); }
+});
+
+best = Number(localStorage.getItem("stardefender-best") || 0);
+resize();
+</script>
+<script src="../../shared/ads.js"></script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Typing Race — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  .text-display { width: 100%; max-width: 560px; font-size: clamp(16px, 4vw, 20px); line-height: 1.7; padding: 18px; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); letter-spacing: 0.3px; }
+  .ch { color: var(--text-dim); }
+  .ch.correct { color: var(--accent); }
+  .ch.wrong { color: var(--danger); background: rgba(255,92,108,0.18); border-radius: 2px; }
+  .ch.current { border-bottom: 2px solid var(--accent2); }
+  #typeInput { width: 100%; max-width: 560px; padding: 14px 16px; font-size: 16px; border-radius: 10px; }
+  .stat-row { display: flex; gap: 24px; justify-content: center; }
+  .stat-row .val { font-size: 22px; font-weight: 800; color: var(--accent2); }
+  .stat-row .lbl { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">TYPING RACE</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SENTENCE <strong id="sentenceNum">1</strong>/3</div>
+    <div>WPM <strong id="liveWpm">0</strong></div>
+    <div>BEST <strong id="best">0</strong> WPM</div>
+  </div>
+  <div class="stage" id="stage" style="min-height: 300px;">
+    <div style="display:flex; flex-direction:column; align-items:center; gap:14px; width:100%;">
+      <div class="text-display" id="textDisplay"></div>
+      <input id="typeInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Start typing to begin..." disabled />
+    </div>
+    <div class="overlay" id="overlay">
+      <h2>TYPING RACE</h2>
+      <p>Type each sentence exactly as shown, as fast and accurately as you can. Three sentences per run.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const SENTENCES = [
+  "The quick brown fox jumps over the lazy dog.",
+  "Pack my box with five dozen liquor jugs.",
+  "A journey of a thousand miles begins with a single step.",
+  "Bright stars scatter across the quiet midnight sky.",
+  "Every good decision starts with a clear, calm mind.",
+  "Small daily habits build remarkable long-term results.",
+  "The old lighthouse guided ships safely through the storm.",
+  "Curiosity is the quiet engine behind every discovery.",
+  "Fresh snow blanketed the sleepy mountain village overnight.",
+  "A well-placed word can change the course of a conversation.",
+  "Practice with patience turns effort into real skill.",
+  "The market buzzed with vendors calling out morning specials.",
+  "Clear goals make difficult choices much easier to navigate.",
+  "Gentle rain tapped steadily against the old window pane.",
+  "Great teams trust each other enough to disagree openly.",
+];
+
+const textDisplay = document.getElementById("textDisplay");
+const typeInput = document.getElementById("typeInput");
+const overlay = document.getElementById("overlay");
+const sentenceNumEl = document.getElementById("sentenceNum");
+const liveWpmEl = document.getElementById("liveWpm");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+let race, idx, current, startTime, totalCorrectChars, totalTypedChars, totalTimeMs, running, best;
+
+function pickRace() {
+  const pool = SENTENCES.slice();
+  const chosen = [];
+  for (let i = 0; i < 3; i++) chosen.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  return chosen;
+}
+
+function renderText() {
+  textDisplay.innerHTML = "";
+  const typed = typeInput.value;
+  [...current].forEach((ch, i) => {
+    const span = document.createElement("span");
+    span.className = "ch";
+    if (i < typed.length) span.classList.add(typed[i] === ch ? "correct" : "wrong");
+    else if (i === typed.length) span.classList.add("current");
+    span.textContent = ch;
+    textDisplay.appendChild(span);
+  });
+}
+
+function onInput() {
+  if (!running) return;
+  if (!startTime) startTime = Date.now();
+  const typed = typeInput.value;
+  renderText();
+
+  const elapsedMin = Math.max((Date.now() - startTime) / 60000, 0.0001);
+  const correctSoFar = [...typed].filter((ch, i) => ch === current[i]).length;
+  liveWpmEl.textContent = Math.round((correctSoFar / 5) / elapsedMin);
+
+  if (typed === current) {
+    const elapsed = Date.now() - startTime;
+    totalCorrectChars += current.length;
+    totalTypedChars += typed.length;
+    totalTimeMs += elapsed;
+    Sound.good();
+    idx++;
+    if (idx >= race.length) { finishRace(); return; }
+    loadSentence();
+  }
+}
+
+function loadSentence() {
+  current = race[idx];
+  startTime = null;
+  typeInput.value = "";
+  sentenceNumEl.textContent = idx + 1;
+  renderText();
+}
+
+function finishRace() {
+  running = false;
+  typeInput.disabled = true;
+  Sound.win();
+  const minutes = Math.max(totalTimeMs / 60000, 0.0001);
+  const wpm = Math.round((totalCorrectChars / 5) / minutes);
+  const accuracy = Math.round((totalCorrectChars / Math.max(totalTypedChars, 1)) * 100);
+  let note = "";
+  if (wpm > best) { best = wpm; localStorage.setItem("typingrace-best", String(best)); note = " — New best!"; }
+  overlay.innerHTML = `<h2>Race Complete!</h2><p>${wpm} WPM &middot; ${accuracy}% accuracy${note}</p><button class="btn" id="startBtn2">Race Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  bestEl.textContent = best;
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  race = pickRace();
+  idx = 0;
+  totalCorrectChars = 0; totalTypedChars = 0; totalTimeMs = 0;
+  running = true;
+  typeInput.disabled = false;
+  typeInput.focus();
+  loadSentence();
+  liveWpmEl.textContent = 0;
+  bestEl.textContent = best;
+}
+
+typeInput.addEventListener("input", onInput);
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("typingrace-best") || 0);
+bestEl.textContent = best;
+current = SENTENCES[0];
+renderText();
+</script>
+<script src="../../shared/ads.js"></script>
+</body>
+</html>

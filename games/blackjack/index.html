@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Blackjack — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  .table-area { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 18px; }
+  .hand-block { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .hand-label { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+  .hand-value { font-size: 13px; color: var(--accent2); font-weight: 700; }
+  .cards-row { display: flex; gap: 6px; min-height: 90px; flex-wrap: wrap; justify-content: center; }
+  .card {
+    width: 56px; height: 80px; border-radius: 8px; background: #eef1fb; color: #1a1c2e;
+    display: flex; flex-direction: column; justify-content: space-between; padding: 4px 5px;
+    font-size: 14px; font-weight: 700; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .card.red { color: #c22a3e; }
+  .card.facedown { background: repeating-linear-gradient(45deg, #2a3363, #2a3363 4px, #1c2560 4px, #1c2560 8px); }
+  .card .suitBig { align-self: center; font-size: 1.3em; }
+  .bet-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .chip-btn { border: none; border-radius: 50%; width: 52px; height: 52px; font-weight: 800; font-size: 13px; cursor: pointer; color: #0b0f2a; }
+  .chip-10 { background: #7cf7c9; } .chip-25 { background: #4fd1ff; } .chip-50 { background: #ffe17d; } .chip-100 { background: #c77dff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">BLACKJACK</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>BANKROLL <strong id="bankroll">100</strong></div>
+    <div>BET <strong id="currentBet">0</strong></div>
+    <div>BEST <strong id="best">100</strong></div>
+  </div>
+  <div class="stage" id="stage" style="min-height: 420px;">
+    <div class="table-area">
+      <div class="hand-block">
+        <div class="hand-label">Dealer</div>
+        <div class="cards-row" id="dealerCards"></div>
+        <div class="hand-value" id="dealerValue"></div>
+      </div>
+      <div class="hand-block">
+        <div class="hand-label">You</div>
+        <div class="cards-row" id="playerCards"></div>
+        <div class="hand-value" id="playerValue"></div>
+      </div>
+      <div class="bet-row" id="betRow">
+        <button class="chip-btn chip-10" data-amt="10">+10</button>
+        <button class="chip-btn chip-25" data-amt="25">+25</button>
+        <button class="chip-btn chip-50" data-amt="50">+50</button>
+        <button class="chip-btn chip-100" data-amt="100">+100</button>
+      </div>
+      <div class="controls" id="betControls">
+        <button class="btn secondary" id="clearBetBtn">Clear</button>
+        <button class="btn" id="dealBtn" disabled>Deal</button>
+      </div>
+      <div class="controls" id="actionControls" style="display:none;">
+        <button class="btn secondary" id="hitBtn">Hit</button>
+        <button class="btn secondary" id="doubleBtn">Double</button>
+        <button class="btn" id="standBtn">Stand</button>
+      </div>
+    </div>
+    <div class="overlay" id="overlay">
+      <h2>BLACKJACK</h2>
+      <p>Bet chips, then Hit or Stand to get as close to 21 as you can without going over. Beat the dealer. Blackjack pays 3:2.</p>
+      <button class="btn" id="startBtn">Sit Down</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const SUITS = ["S", "H", "D", "C"];
+const SUIT_GLYPH = { S: "♠", H: "♥", D: "♦", C: "♣" };
+const RANK_LABEL = { 1: "A", 11: "J", 12: "Q", 13: "K" };
+function rankLabel(r) { return RANK_LABEL[r] || String(r); }
+function isRed(suit) { return suit === "H" || suit === "D"; }
+
+const dealerCardsEl = document.getElementById("dealerCards");
+const playerCardsEl = document.getElementById("playerCards");
+const dealerValueEl = document.getElementById("dealerValue");
+const playerValueEl = document.getElementById("playerValue");
+const bankrollEl = document.getElementById("bankroll");
+const currentBetEl = document.getElementById("currentBet");
+const bestEl = document.getElementById("best");
+const betControls = document.getElementById("betControls");
+const actionControls = document.getElementById("actionControls");
+const betRow = document.getElementById("betRow");
+const dealBtn = document.getElementById("dealBtn");
+const overlay = document.getElementById("overlay");
+const muteBtn = document.getElementById("muteBtn");
+
+let bankroll, bet, deck, playerHand, dealerHand, phase, best;
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function freshDeck() {
+  const deck = [];
+  for (const suit of SUITS) for (let rank = 1; rank <= 13; rank++) deck.push({ suit, rank });
+  return shuffle(deck);
+}
+function cardValue(card) { return card.rank === 1 ? 11 : Math.min(card.rank, 10); }
+function handValue(cards) {
+  let sum = cards.reduce((s, c) => s + cardValue(c), 0);
+  let aces = cards.filter((c) => c.rank === 1).length;
+  while (sum > 21 && aces > 0) { sum -= 10; aces--; }
+  return sum;
+}
+function isBlackjack(cards) { return cards.length === 2 && handValue(cards) === 21; }
+
+function buildCardEl(card, faceUp) {
+  const el = document.createElement("div");
+  el.className = "card " + (faceUp ? (isRed(card.suit) ? "red" : "") : "facedown");
+  if (faceUp) {
+    el.innerHTML = `<div>${rankLabel(card.rank)}${SUIT_GLYPH[card.suit]}</div><div class="suitBig">${SUIT_GLYPH[card.suit]}</div><div style="align-self:flex-end;transform:rotate(180deg);">${rankLabel(card.rank)}${SUIT_GLYPH[card.suit]}</div>`;
+  }
+  return el;
+}
+
+function render() {
+  dealerCardsEl.innerHTML = "";
+  playerCardsEl.innerHTML = "";
+  dealerHand.forEach((c, i) => dealerCardsEl.appendChild(buildCardEl(c, phase !== "player" || i === 0)));
+  playerHand.forEach((c) => playerCardsEl.appendChild(buildCardEl(c, true)));
+
+  playerValueEl.textContent = playerHand.length ? handValue(playerHand) : "";
+  dealerValueEl.textContent = phase === "player" ? (dealerHand.length ? handValue([dealerHand[0]]) + " + ?" : "") : (dealerHand.length ? handValue(dealerHand) : "");
+
+  bankrollEl.textContent = bankroll;
+  currentBetEl.textContent = bet;
+  bestEl.textContent = best;
+  dealBtn.disabled = bet === 0 || bet > bankroll;
+}
+
+function addChip(amt) {
+  if (phase !== "betting") return;
+  if (amt > bankroll - bet) return;
+  bet += amt;
+  Sound.click();
+  render();
+}
+function clearBet() {
+  if (phase !== "betting") return;
+  bet = 0;
+  render();
+}
+
+function deal() {
+  if (bet === 0 || bet > bankroll) return;
+  Sound.init();
+  deck = freshDeck();
+  playerHand = [deck.pop(), deck.pop()];
+  dealerHand = [deck.pop(), deck.pop()];
+  phase = "player";
+  betControls.style.display = "none";
+  actionControls.style.display = "flex";
+  Sound.click();
+  render();
+
+  if (isBlackjack(playerHand) || isBlackjack(dealerHand)) {
+    resolveRound();
+  }
+}
+
+function hit() {
+  if (phase !== "player") return;
+  playerHand.push(deck.pop());
+  Sound.click();
+  render();
+  if (handValue(playerHand) > 21) resolveRound();
+}
+
+function doubleDown() {
+  if (phase !== "player" || playerHand.length !== 2 || bet > bankroll - bet) return;
+  bet *= 2;
+  playerHand.push(deck.pop());
+  Sound.click();
+  render();
+  resolveRound();
+}
+
+function stand() {
+  if (phase !== "player") return;
+  resolveRound();
+}
+
+function resolveRound() {
+  phase = "dealer";
+  render();
+  const playerBust = handValue(playerHand) > 21;
+  // A natural blackjack (either side) resolves immediately — the dealer never
+  // draws further, regardless of what their total would become.
+  const alreadySettled = playerBust || isBlackjack(playerHand) || isBlackjack(dealerHand);
+  if (!alreadySettled) {
+    while (handValue(dealerHand) < 17) dealerHand.push(deck.pop());
+  }
+  phase = "done";
+  render();
+
+  const pVal = handValue(playerHand);
+  const dVal = handValue(dealerHand);
+  const pBJ = isBlackjack(playerHand);
+  const dBJ = isBlackjack(dealerHand);
+  let outcome, delta;
+
+  if (pVal > 21) { outcome = "Bust — you lose"; delta = -bet; }
+  else if (pBJ && dBJ) { outcome = "Both blackjack — push"; delta = 0; }
+  else if (pBJ) { outcome = "Blackjack! You win"; delta = Math.round(bet * 1.5); }
+  else if (dBJ) { outcome = "Dealer blackjack — you lose"; delta = -bet; }
+  else if (dVal > 21) { outcome = "Dealer busts — you win"; delta = bet; }
+  else if (pVal > dVal) { outcome = "You win"; delta = bet; }
+  else if (pVal < dVal) { outcome = "Dealer wins"; delta = -bet; }
+  else { outcome = "Push"; delta = 0; }
+
+  bankroll += delta;
+  Sound[delta > 0 ? "win" : delta < 0 ? "bad" : "click"]();
+  if (bankroll > best) { best = bankroll; localStorage.setItem("blackjack-best", String(best)); }
+  render();
+
+  if (bankroll <= 0) {
+    overlay.innerHTML = `<h2>${outcome}</h2><p>Out of chips. Final bankroll: 0.</p><button class="btn" id="startBtn2">New Bankroll</button>`;
+    overlay.style.display = "flex";
+    document.getElementById("startBtn2").addEventListener("click", start);
+    return;
+  }
+
+  setTimeout(() => {
+    bet = 0;
+    phase = "betting";
+    actionControls.style.display = "none";
+    betControls.style.display = "flex";
+    playerHand = []; dealerHand = [];
+    render();
+  }, 1600);
+
+  showToast(outcome, delta);
+}
+
+function showToast(outcome, delta) {
+  const existing = document.getElementById("toast");
+  if (existing) existing.remove();
+  const toast = document.createElement("div");
+  toast.id = "toast";
+  toast.style.cssText = "position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(6,8,22,0.9);padding:8px 16px;border-radius:999px;font-size:13px;font-weight:700;color:" + (delta > 0 ? "#7cf7c9" : delta < 0 ? "#ff5c6c" : "#ffe17d") + ";border:1px solid var(--panel-border);z-index:5;";
+  toast.textContent = outcome + (delta !== 0 ? ` (${delta > 0 ? "+" : ""}${delta})` : "");
+  document.getElementById("stage").appendChild(toast);
+  setTimeout(() => toast.remove(), 1700);
+}
+
+function start() {
+  overlay.style.display = "none";
+  bankroll = 100;
+  bet = 0;
+  phase = "betting";
+  playerHand = []; dealerHand = [];
+  betControls.style.display = "flex";
+  actionControls.style.display = "none";
+  render();
+}
+
+document.getElementById("startBtn").addEventListener("click", start);
+betRow.addEventListener("click", (e) => { const b = e.target.closest("[data-amt]"); if (b) addChip(Number(b.dataset.amt)); });
+document.getElementById("clearBetBtn").addEventListener("click", clearBet);
+dealBtn.addEventListener("click", deal);
+document.getElementById("hitBtn").addEventListener("click", hit);
+document.getElementById("standBtn").addEventListener("click", stand);
+document.getElementById("doubleBtn").addEventListener("click", doubleDown);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("blackjack-best") || 100);
+playerHand = []; dealerHand = []; bankroll = 100; bet = 0; phase = "betting";
+render();
+</script>
+<script src="../../shared/ads.js"></script>
+</body>
+</html>

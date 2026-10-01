@@ -4,14 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Arcade Collection</title>
-<meta name="description" content="Twenty-nine small, dependency-free browser games — arcade classics, deep-system strategy games, reimagined board games, and five completely original mechanics." />
+<meta name="description" content="Thirty-nine small, dependency-free browser games — arcade classics, deep-system strategy games, reimagined board games, casino and dice games, and five completely original mechanics." />
 <meta name="theme-color" content="#0b0f2a" />
 <meta property="og:title" content="Arcade Collection" />
-<meta property="og:description" content="Twenty-nine small, free browser games — arcade classics, deep strategy games, reimagined board games, and five original mechanics you won't find anywhere else." />
+<meta property="og:description" content="Thirty-nine small, free browser games — arcade classics, deep strategy games, reimagined board games, and five original mechanics you won't find anywhere else." />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Arcade Collection" />
-<meta name="twitter:description" content="Twenty-nine small, free browser games. No installs, no accounts, just play." />
+<meta name="twitter:description" content="Thirty-nine small, free browser games. No installs, no accounts, just play." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230b0f2a'/%3E%3Ccircle cx='50' cy='50' r='30' fill='none' stroke='%237cf7c9' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='10' fill='%237cf7c9'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="shared/style.css" />
 <style>
@@ -75,7 +75,7 @@
 <div class="wrap">
   <div class="hero">
     <h1>ARCADE COLLECTION</h1>
-    <p id="gameCountLabel">Twenty-nine small games. Pick one.</p>
+    <p id="gameCountLabel">Thirty-nine small games. Pick one.</p>
   </div>
 
   <nav class="jump-pills" aria-label="Jump to category">
@@ -83,13 +83,14 @@
     <a href="#sec-deep">Deeper Systems</a>
     <a href="#sec-classics">Classics</a>
     <a href="#sec-original">Never Seen Before</a>
+    <a href="#sec-more">More Games</a>
   </nav>
 
   <div class="search-row">
     <form class="search-box" role="search" onsubmit="return false;">
       <label for="searchInput" class="visually-hidden">Search games by name or description</label>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input id="searchInput" type="search" placeholder="Search 29 games..." autocomplete="off" />
+      <input id="searchInput" type="search" placeholder="Search 39 games..." autocomplete="off" />
     </form>
     <div class="search-meta">
       <span id="resultCount"></span>
@@ -150,9 +151,25 @@
     </div>
   </section>
 
+  <section class="game-section" id="sec-more" aria-labelledby="lbl-more">
+    <h2 class="section-label" id="lbl-more">More games</h2>
+    <div class="tiles">
+      <a class="home-tile" href="games/blackjack/index.html" data-name="Blackjack" data-desc="Beat the dealer, blackjack pays 3:2, card game casino"><div class="tile"><div class="emoji" aria-hidden="true">🂡</div><div class="name">Blackjack</div><div class="desc">Beat the dealer, blackjack pays 3:2</div></div></a>
+      <a class="home-tile" href="games/five-dice/index.html" data-name="Five Dice" data-desc="Roll, hold, score all 13 categories, dice game"><div class="tile"><div class="emoji" aria-hidden="true">🎲</div><div class="name">Five Dice</div><div class="desc">Roll, hold, score all 13 categories</div></div></a>
+      <a class="home-tile" href="games/checkers/index.html" data-name="Checkers" data-desc="Mandatory captures, chain jumps, kings, vs AI"><div class="tile"><div class="emoji" aria-hidden="true">⚫</div><div class="name">Checkers</div><div class="badge">AI</div><div class="desc">Mandatory captures, chain jumps, kings</div></div></a>
+      <a class="home-tile" href="games/reversi/index.html" data-name="Reversi" data-desc="Outflank and flip the board, vs AI"><div class="tile"><div class="emoji" aria-hidden="true">⚪</div><div class="name">Reversi</div><div class="badge">AI</div><div class="desc">Outflank and flip the whole board</div></div></a>
+      <a class="home-tile" href="games/gem-swap/index.html" data-name="Gem Swap" data-desc="Swap to match 3, chase the cascade, match-3"><div class="tile"><div class="emoji" aria-hidden="true">💎</div><div class="name">Gem Swap</div><div class="desc">Swap to match 3, chase the cascade</div></div></a>
+      <a class="home-tile" href="games/sliding-puzzle/index.html" data-name="Sliding Puzzle" data-desc="Classic 15-puzzle, slide tiles back in order"><div class="tile"><div class="emoji" aria-hidden="true">🔢</div><div class="name">Sliding Puzzle</div><div class="desc">Slide tiles back into order, 1 through 15</div></div></a>
+      <a class="home-tile" href="games/sokoban/index.html" data-name="Crate Pusher" data-desc="Push crates onto targets, sokoban puzzle"><div class="tile"><div class="emoji" aria-hidden="true">📦</div><div class="name">Crate Pusher</div><div class="desc">Push every crate onto a target</div></div></a>
+      <a class="home-tile" href="games/pattern-memory/index.html" data-name="Pattern Memory" data-desc="Watch and repeat the growing sequence, simon"><div class="tile"><div class="emoji" aria-hidden="true">🔶</div><div class="name">Pattern Memory</div><div class="desc">Watch and repeat the growing sequence</div></div></a>
+      <a class="home-tile" href="games/star-defender/index.html" data-name="Star Defender" data-desc="Clear the descending formation, space shooter"><div class="tile"><div class="emoji" aria-hidden="true">🛸</div><div class="name">Star Defender</div><div class="desc">Clear the descending formation</div></div></a>
+      <a class="home-tile" href="games/typing-race/index.html" data-name="Typing Race" data-desc="Type fast and accurately, three sentences"><div class="tile"><div class="emoji" aria-hidden="true">⌨️</div><div class="name">Typing Race</div><div class="desc">Type fast and accurately, three sentences</div></div></a>
+    </div>
+  </section>
+
   <p class="no-results" id="noResults">No games match your search.</p>
 
-  <footer>29 games &middot; no build step &middot; no dependencies &middot; runs entirely in your browser &middot; <a href="privacy-policy.html" style="color:inherit;">Privacy Policy</a></footer>
+  <footer>39 games &middot; no build step &middot; no dependencies &middot; runs entirely in your browser &middot; <a href="privacy-policy.html" style="color:inherit;">Privacy Policy</a></footer>
 </div>
 <script>
   const searchInput = document.getElementById("searchInput");

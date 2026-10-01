@@ -31,4 +31,14 @@
   <url><loc>https://arcade-collection.vercel.app/games/tower-defense/index.html</loc><priority>0.8</priority></url>
   <url><loc>https://arcade-collection.vercel.app/games/word-guess/index.html</loc><priority>0.8</priority></url>
   <url><loc>https://arcade-collection.vercel.app/games/word-tower/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/blackjack/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/five-dice/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/checkers/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/reversi/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/gem-swap/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/sliding-puzzle/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/sokoban/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/pattern-memory/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/star-defender/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://arcade-collection.vercel.app/games/typing-race/index.html</loc><priority>0.8</priority></url>
 </urlset>

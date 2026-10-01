@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Pattern Memory — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #pads { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; width: 100%; max-width: 360px; aspect-ratio: 1/1; }
+  .pad { border-radius: 16px; border: none; cursor: pointer; opacity: 0.55; transition: opacity 0.1s, transform 0.1s; }
+  .pad.active { opacity: 1; transform: scale(0.97); box-shadow: 0 0 30px currentColor; }
+  .pad.p0 { background: #ff5c6c; color: #ff5c6c; border-radius: 16px 4px 4px 4px; }
+  .pad.p1 { background: #4fd1ff; color: #4fd1ff; border-radius: 4px 16px 4px 4px; }
+  .pad.p2 { background: #ffe17d; color: #ffe17d; border-radius: 4px 4px 4px 16px; }
+  .pad.p3 { background: #7cf7c9; color: #7cf7c9; border-radius: 4px 4px 16px 4px; }
+  .pad:disabled { cursor: default; }
+  #centerLabel { font-size: 15px; color: var(--text-dim); text-align: center; min-height: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">PATTERN MEMORY</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>ROUND <strong id="round">0</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage" style="min-height: 420px;">
+    <div style="display:flex; flex-direction:column; align-items:center; gap:14px; width:100%;">
+      <div id="pads">
+        <button class="pad p0" data-i="0"></button>
+        <button class="pad p1" data-i="1"></button>
+        <button class="pad p2" data-i="2"></button>
+        <button class="pad p3" data-i="3"></button>
+      </div>
+      <div id="centerLabel">Watch the pattern, then repeat it</div>
+    </div>
+    <div class="overlay" id="overlay">
+      <h2>PATTERN MEMORY</h2>
+      <p>Watch the sequence light up, then click the panels back in the same order. Each round adds one more step.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const pads = [...document.querySelectorAll(".pad")];
+const overlay = document.getElementById("overlay");
+const roundEl = document.getElementById("round");
+const bestEl = document.getElementById("best");
+const centerLabel = document.getElementById("centerLabel");
+const muteBtn = document.getElementById("muteBtn");
+
+let sequence, playerIndex, phase, running, best;
+
+function setPadsEnabled(enabled) { pads.forEach((p) => (p.disabled = !enabled)); }
+
+function flash(idx, duration) {
+  return new Promise((resolve) => {
+    pads[idx].classList.add("active");
+    Sound.click();
+    setTimeout(() => { pads[idx].classList.remove("active"); setTimeout(resolve, 120); }, duration);
+  });
+}
+
+async function playSequence() {
+  phase = "showing";
+  setPadsEnabled(false);
+  centerLabel.textContent = "Watch...";
+  await new Promise((r) => setTimeout(r, 500));
+  const speed = Math.max(260, 650 - sequence.length * 18);
+  for (const idx of sequence) await flash(idx, speed);
+  if (phase !== "showing") return;
+  phase = "input";
+  playerIndex = 0;
+  setPadsEnabled(true);
+  centerLabel.textContent = "Your turn";
+}
+
+function onPadClick(idx) {
+  if (phase !== "input" || !running) return;
+  if (idx === sequence[playerIndex]) {
+    pads[idx].classList.add("active");
+    setTimeout(() => pads[idx].classList.remove("active"), 150);
+    Sound.click();
+    playerIndex++;
+    roundEl.textContent = sequence.length;
+    if (playerIndex === sequence.length) {
+      Sound.good();
+      setPadsEnabled(false);
+      setTimeout(nextRound, 600);
+    }
+  } else {
+    gameOver();
+  }
+}
+
+function nextRound() {
+  sequence.push(Math.floor(Math.random() * 4));
+  playSequence();
+}
+
+function gameOver() {
+  running = false;
+  phase = "idle";
+  setPadsEnabled(false);
+  Sound.bad();
+  const score = sequence.length - 1;
+  if (score > best) { best = score; localStorage.setItem("patternmemory-best", String(best)); }
+  overlay.innerHTML = `<h2>Pattern broken!</h2><p>You reached round ${score + 1}${score===best&&score>0?" — New best!":""}</p><button class="btn" id="startBtn2">Try Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  bestEl.textContent = best;
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  sequence = [];
+  running = true;
+  roundEl.textContent = 0;
+  bestEl.textContent = best;
+  nextRound();
+}
+
+pads.forEach((p) => p.addEventListener("click", () => onPadClick(Number(p.dataset.i))));
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("patternmemory-best") || 0);
+bestEl.textContent = best;
+setPadsEnabled(false);
+</script>
+<script src="../../shared/ads.js"></script>
+</body>
+</html>

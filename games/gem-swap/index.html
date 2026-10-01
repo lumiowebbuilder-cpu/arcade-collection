@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Gem Swap — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  #stage { aspect-ratio: 1/1; width: 100%; max-width: 440px; touch-action: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">GEM SWAP</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>SCORE <strong id="score">0</strong></div>
+    <div>MOVES <strong id="movesLeft">20</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="board"></canvas>
+    <div class="overlay" id="overlay">
+      <h2>GEM SWAP</h2>
+      <p>Swap two adjacent gems to line up 3 or more of the same color. Matches cascade for bonus points. You have 20 moves.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const ROWS = 8, COLS = 8;
+const COLORS = ["#ff5c6c", "#ffe17d", "#7cf7c9", "#4fd1ff", "#c77dff", "#ff9a62"];
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const movesLeftEl = document.getElementById("movesLeft");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+let board, score, movesLeft, running, cellPx, selected, best, busy;
+
+function randColor() { return Math.floor(Math.random() * COLORS.length); }
+
+function generateBoard() {
+  const b = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      let color;
+      do { color = randColor(); } while (
+        (c >= 2 && b[r][c - 1] === color && b[r][c - 2] === color) ||
+        (r >= 2 && b[r - 1][c] === color && b[r - 2][c] === color)
+      );
+      b[r][c] = color;
+    }
+  }
+  return b;
+}
+
+function findMatches(b) {
+  const matched = new Set();
+  for (let r = 0; r < ROWS; r++) {
+    let runStart = 0;
+    for (let c = 1; c <= COLS; c++) {
+      if (c < COLS && b[r][c] !== null && b[r][c] === b[r][runStart]) continue;
+      const runLen = c - runStart;
+      if (runLen >= 3 && b[r][runStart] !== null) for (let k = runStart; k < c; k++) matched.add(r + "," + k);
+      runStart = c;
+    }
+  }
+  for (let c = 0; c < COLS; c++) {
+    let runStart = 0;
+    for (let r = 1; r <= ROWS; r++) {
+      if (r < ROWS && b[r][c] !== null && b[r][c] === b[runStart][c]) continue;
+      const runLen = r - runStart;
+      if (runLen >= 3 && b[runStart][c] !== null) for (let k = runStart; k < r; k++) matched.add(k + "," + c);
+      runStart = r;
+    }
+  }
+  return matched;
+}
+
+function clearAndDrop(b, matched) {
+  for (const key of matched) { const [r, c] = key.split(",").map(Number); b[r][c] = null; }
+  for (let c = 0; c < COLS; c++) {
+    let writeRow = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (b[r][c] !== null) {
+        b[writeRow][c] = b[r][c];
+        if (writeRow !== r) b[r][c] = null;
+        writeRow--;
+      }
+    }
+    for (let r = writeRow; r >= 0; r--) b[r][c] = randColor();
+  }
+}
+
+function hasValidMove(b) {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      for (const [dr, dc] of [[0, 1], [1, 0]]) {
+        const nr = r + dr, nc = c + dc;
+        if (nr >= ROWS || nc >= COLS) continue;
+        [b[r][c], b[nr][nc]] = [b[nr][nc], b[r][c]];
+        const m = findMatches(b).size > 0;
+        [b[r][c], b[nr][nc]] = [b[nr][nc], b[r][c]];
+        if (m) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = rect.height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cellPx = rect.width / COLS;
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "#05061a";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+  if (!board) return;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cx = c * cellPx + cellPx / 2, cy = r * cellPx + cellPx / 2;
+      const v = board[r][c];
+      if (v === null) continue;
+      ctx.fillStyle = COLORS[v];
+      ctx.shadowColor = COLORS[v];
+      ctx.shadowBlur = selected && selected.r === r && selected.c === c ? 16 : 5;
+      ctx.beginPath();
+      ctx.roundRect(cx - cellPx * 0.38, cy - cellPx * 0.38, cellPx * 0.76, cellPx * 0.76, 8);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      if (selected && selected.r === r && selected.c === c) {
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function updateHud() {
+  scoreEl.textContent = score;
+  movesLeftEl.textContent = movesLeft;
+  bestEl.textContent = best;
+}
+
+function canvasCell(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((clientX - rect.left) / cellPx);
+  const r = Math.floor((clientY - rect.top) / cellPx);
+  return { r, c };
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (!running || busy) return;
+  const { r, c } = canvasCell(e.clientX, e.clientY);
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return;
+  if (!selected) {
+    selected = { r, c };
+    draw();
+    return;
+  }
+  const dr = Math.abs(selected.r - r), dc = Math.abs(selected.c - c);
+  if (dr + dc === 1) {
+    trySwap(selected.r, selected.c, r, c);
+    selected = null;
+  } else {
+    selected = { r, c };
+  }
+  draw();
+});
+
+function trySwap(r1, c1, r2, c2) {
+  if (movesLeft <= 0) return;
+  [board[r1][c1], board[r2][c2]] = [board[r2][c2], board[r1][c1]];
+  const matches = findMatches(board);
+  if (matches.size === 0) {
+    [board[r1][c1], board[r2][c2]] = [board[r2][c2], board[r1][c1]];
+    Sound.bad();
+    return;
+  }
+  movesLeft--;
+  Sound.click();
+  updateHud();
+  resolveCascade();
+}
+
+function resolveCascade() {
+  busy = true;
+  let chain = 1;
+  function step() {
+    const matches = findMatches(board);
+    if (matches.size === 0) {
+      busy = false;
+      if (!hasValidMove(board)) {
+        do { board = generateBoard(); } while (!hasValidMove(board));
+        Sound.move();
+      }
+      draw();
+      if (movesLeft <= 0) endGame();
+      return;
+    }
+    score += matches.size * 10 * chain;
+    Sound.coin();
+    chain++;
+    clearAndDrop(board, matches);
+    updateHud();
+    draw();
+    setTimeout(step, 200);
+  }
+  step();
+}
+
+function endGame() {
+  running = false;
+  Sound.win();
+  if (score > best) { best = score; localStorage.setItem("gemswap-best", String(best)); }
+  overlay.innerHTML = `<h2>Out of moves!</h2><p>Final score: ${score}${score===best?" — New best!":""}</p><button class="btn" id="startBtn2">Play Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  updateHud();
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  do { board = generateBoard(); } while (!hasValidMove(board));
+  score = 0; movesLeft = 20; running = true; busy = false; selected = null;
+  updateHud();
+  draw();
+}
+
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("gemswap-best") || 0);
+board = generateBoard();
+resize();
+</script>
+<script src="../../shared/ads.js"></script>
+</body>
+</html>

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Five Dice — Arcade Collection</title>
+<link rel="stylesheet" href="../../shared/style.css" />
+<style>
+  .dice-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .die {
+    width: 58px; height: 58px; border-radius: 12px; background: #eef1fb; color: #1a1c2e;
+    font-size: 26px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; border: 3px solid transparent; transition: transform 0.1s, border-color 0.15s;
+  }
+  .die.held { border-color: var(--accent); background: #d7fff0; transform: translateY(-4px); }
+  .die.rolling { animation: shake 0.3s; }
+  @keyframes shake { 0%,100%{transform:rotate(0);} 25%{transform:rotate(-8deg);} 75%{transform:rotate(8deg);} }
+  .score-table { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+  .score-row {
+    display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;
+    border-radius: 8px; background: rgba(255,255,255,0.04); cursor: pointer; font-size: 13px;
+  }
+  .score-row.filled { cursor: default; color: var(--text-dim); }
+  .score-row.available:hover { background: rgba(124,247,201,0.12); }
+  .score-row .preview { color: var(--accent2); font-weight: 700; }
+  .score-row .final { color: var(--text); font-weight: 700; }
+  .section-head { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin: 6px 0 -2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back-link" href="../../index.html">&larr; Arcade</a>
+    <h1 class="game-title">FIVE DICE</h1>
+    <button class="back-link" id="muteBtn">Mute</button>
+  </div>
+  <div class="hud">
+    <div>TURN <strong id="turnNum">1</strong>/13</div>
+    <div>SCORE <strong id="totalScore">0</strong></div>
+    <div>BEST <strong id="best">0</strong></div>
+  </div>
+  <div class="stage" id="stage" style="min-height: 460px;">
+    <div style="width:100%; display:flex; flex-direction:column; align-items:center; gap:16px;">
+      <div class="dice-row" id="diceRow"></div>
+      <button class="btn" id="rollBtn">Roll (<span id="rollsLeft">3</span> left)</button>
+      <div class="score-table" id="scoreTable"></div>
+    </div>
+    <div class="overlay" id="overlay">
+      <h2>FIVE DICE</h2>
+      <p>Roll up to 3 times per turn, holding any dice you like between rolls. After your last roll, lock in a score in one open category. Fill all 13 to finish.</p>
+      <button class="btn" id="startBtn">Start</button>
+    </div>
+  </div>
+</div>
+<script src="../../shared/sound.js"></script>
+<script>
+const diceRowEl = document.getElementById("diceRow");
+const rollBtn = document.getElementById("rollBtn");
+const rollsLeftEl = document.getElementById("rollsLeft");
+const scoreTableEl = document.getElementById("scoreTable");
+const overlay = document.getElementById("overlay");
+const turnNumEl = document.getElementById("turnNum");
+const totalScoreEl = document.getElementById("totalScore");
+const bestEl = document.getElementById("best");
+const muteBtn = document.getElementById("muteBtn");
+
+const UPPER = [
+  { id: "ones", label: "Ones", face: 1 },
+  { id: "twos", label: "Twos", face: 2 },
+  { id: "threes", label: "Threes", face: 3 },
+  { id: "fours", label: "Fours", face: 4 },
+  { id: "fives", label: "Fives", face: 5 },
+  { id: "sixes", label: "Sixes", face: 6 },
+];
+const LOWER = [
+  { id: "threeKind", label: "Three of a Kind" },
+  { id: "fourKind", label: "Four of a Kind" },
+  { id: "fullHouse", label: "Full House" },
+  { id: "smallStraight", label: "Small Straight" },
+  { id: "largeStraight", label: "Large Straight" },
+  { id: "fiveAlike", label: "Five Alike" },
+  { id: "chance", label: "Chance" },
+];
+const ALL_CATEGORIES = [...UPPER, ...LOWER];
+const DIE_GLYPH = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+
+function counts(dice) {
+  const c = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  dice.forEach((v) => c[v]++);
+  return c;
+}
+function sumOf(dice) { return dice.reduce((a, b) => a + b, 0); }
+
+function scoreFor(id, dice) {
+  const c = counts(dice);
+  const vals = Object.values(c);
+  const distinct = [...new Set(dice)].sort().join(",");
+  switch (id) {
+    case "ones": return c[1] * 1;
+    case "twos": return c[2] * 2;
+    case "threes": return c[3] * 3;
+    case "fours": return c[4] * 4;
+    case "fives": return c[5] * 5;
+    case "sixes": return c[6] * 6;
+    case "threeKind": return vals.some((n) => n >= 3) ? sumOf(dice) : 0;
+    case "fourKind": return vals.some((n) => n >= 4) ? sumOf(dice) : 0;
+    case "fullHouse": return vals.includes(3) && vals.includes(2) ? 25 : 0;
+    case "smallStraight": return ["1,2,3,4", "2,3,4,5", "3,4,5,6"].some((s) => distinct.includes(s) || isSubsequence(s, distinct)) ? 30 : 0;
+    case "largeStraight": return distinct === "1,2,3,4,5" || distinct === "2,3,4,5,6" ? 40 : 0;
+    case "fiveAlike": return vals.some((n) => n >= 5) ? 50 : 0;
+    case "chance": return sumOf(dice);
+    default: return 0;
+  }
+}
+function isSubsequence(needle, haystackCsv) {
+  const need = needle.split(",");
+  const have = haystackCsv.split(",");
+  return need.every((n) => have.includes(n));
+}
+
+let dice, held, rollsLeft, scores, turn, running, best;
+
+function newDice() { return Array.from({ length: 5 }, () => 1 + Math.floor(Math.random() * 6)); }
+
+function rollDice() {
+  if (!running || rollsLeft <= 0) return;
+  Sound.click();
+  dice = dice.map((v, i) => (held[i] ? v : 1 + Math.floor(Math.random() * 6)));
+  rollsLeft--;
+  render(true);
+}
+
+function toggleHold(i) {
+  if (!running || rollsLeft === 3) return;
+  held[i] = !held[i];
+  Sound.move();
+  render(false);
+}
+
+function pickCategory(id) {
+  if (!running || rollsLeft === 3 || scores[id] !== null) return;
+  scores[id] = scoreFor(id, dice);
+  Sound.good();
+  turn++;
+  if (turn > 13) { finishGame(); return; }
+  dice = newDice();
+  held = [false, false, false, false, false];
+  rollsLeft = 3;
+  render(false);
+}
+
+function upperTotal() { return UPPER.reduce((s, c) => s + (scores[c.id] || 0), 0); }
+function bonus() { return upperTotal() >= 63 ? 35 : 0; }
+function grandTotal() { return ALL_CATEGORIES.reduce((s, c) => s + (scores[c.id] || 0), 0) + bonus(); }
+
+function render(rolling) {
+  diceRowEl.innerHTML = "";
+  dice.forEach((v, i) => {
+    const d = document.createElement("div");
+    d.className = "die" + (held[i] ? " held" : "") + (rolling && !held[i] ? " rolling" : "");
+    d.textContent = DIE_GLYPH[v];
+    d.addEventListener("click", () => toggleHold(i));
+    diceRowEl.appendChild(d);
+  });
+
+  rollsLeftEl.textContent = rollsLeft;
+  rollBtn.disabled = !running || rollsLeft <= 0;
+
+  scoreTableEl.innerHTML = "";
+  const section = (label, cats) => {
+    const head = document.createElement("div");
+    head.className = "section-head";
+    head.textContent = label;
+    scoreTableEl.appendChild(head);
+    cats.forEach((c) => {
+      const row = document.createElement("div");
+      const filled = scores[c.id] !== null;
+      const canPick = running && rollsLeft < 3 && !filled;
+      row.className = "score-row " + (filled ? "filled" : "available");
+      const value = filled ? scores[c.id] : (canPick ? scoreFor(c.id, dice) : "—");
+      row.innerHTML = `<span>${c.label}</span><span class="${filled ? "final" : "preview"}">${value}</span>`;
+      if (canPick) row.addEventListener("click", () => pickCategory(c.id));
+      scoreTableEl.appendChild(row);
+    });
+  };
+  section("Upper Section", UPPER);
+  const bonusRow = document.createElement("div");
+  bonusRow.className = "score-row filled";
+  bonusRow.innerHTML = `<span>Bonus (63+ upper = 35)</span><span class="final">${bonus()}</span>`;
+  scoreTableEl.appendChild(bonusRow);
+  section("Lower Section", LOWER);
+
+  turnNumEl.textContent = Math.min(turn, 13);
+  totalScoreEl.textContent = grandTotal();
+  bestEl.textContent = best;
+}
+
+function finishGame() {
+  running = false;
+  const total = grandTotal();
+  Sound.win();
+  if (total > best) { best = total; localStorage.setItem("fivedice-best", String(best)); }
+  overlay.innerHTML = `<h2>Final Score: ${total}</h2><p>${total===best?"New best!":"Best: "+best}</p><button class="btn" id="startBtn2">Play Again</button>`;
+  overlay.style.display = "flex";
+  document.getElementById("startBtn2").addEventListener("click", start);
+  render(false);
+}
+
+function start() {
+  Sound.init();
+  overlay.style.display = "none";
+  scores = {};
+  ALL_CATEGORIES.forEach((c) => (scores[c.id] = null));
+  dice = newDice();
+  held = [false, false, false, false, false];
+  rollsLeft = 3;
+  turn = 1;
+  running = true;
+  render(false);
+}
+
+rollBtn.addEventListener("click", rollDice);
+document.getElementById("startBtn").addEventListener("click", start);
+muteBtn.addEventListener("click", () => {
+  Sound.setMuted(!Sound.isMuted());
+  muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+});
+muteBtn.textContent = Sound.isMuted() ? "Unmute" : "Mute";
+
+best = Number(localStorage.getItem("fivedice-best") || 0);
+scores = {}; ALL_CATEGORIES.forEach((c) => (scores[c.id] = null));
+dice = newDice(); held = [false,false,false,false,false]; rollsLeft = 3; turn = 1; running = false;
+render(false);
+</script>
+<script src="../../shared/ads.js"></script>
+</body>
+</html>
