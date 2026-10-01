@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://PLACEHOLDER-DOMAIN/</loc><priority>1.0</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/privacy-policy.html</loc><priority>0.2</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/2048/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/asteroids/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/battleship/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/block-drop/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/breakout/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/bubble-shooter/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/card-battler/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/chess/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/connect-four/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/echo-maze/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/field-runner/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/flap/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/hopper/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/lights-out/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/mastermind/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/memory-match/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/minesweeper/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/orbit-golf/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/platformer/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/pong/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/rewind-runner/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/roguelike/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/snake/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/solitaire/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/sudoku/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/tactics/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/tower-defense/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/word-guess/index.html</loc><priority>0.8</priority></url>
+  <url><loc>https://PLACEHOLDER-DOMAIN/games/word-tower/index.html</loc><priority>0.8</priority></url>
+</urlset>

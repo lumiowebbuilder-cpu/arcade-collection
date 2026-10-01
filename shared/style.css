@@ -286,6 +286,18 @@ input[type="number"]:hover {
   border-color: rgba(255, 255, 255, 0.25);
 }
 
+.ad-slot {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  justify-content: center;
+  margin: 4px 0;
+  overflow: hidden;
+}
+.ad-slot ins.adsbygoogle {
+  width: 100%;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
