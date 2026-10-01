@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://PLACEHOLDER-DOMAIN/sitemap.xml
+Sitemap: https://arcade-collection.vercel.app/sitemap.xml
